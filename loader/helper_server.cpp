@@ -122,59 +122,70 @@ std::string synth_id_token() {
     return "preservation." + config().player_id;
 }
 
+// The request is {"<command>":{...params...}} - the command is the sole
+// top-level key. Return it.
+std::string top_command(const std::string& req) {
+    size_t b = req.find('{');
+    if (b == std::string::npos) return "";
+    size_t q1 = req.find('"', b);
+    if (q1 == std::string::npos) return "";
+    size_t q2 = req.find('"', q1 + 1);
+    if (q2 == std::string::npos) return "";
+    return req.substr(q1 + 1, q2 - q1 - 1);
+}
+
 std::string handle_command(const std::string& req) {
-    std::string action = jget(req, "action");
-    if (action.empty()) action = jget(req, "command");
-    if (action.empty()) action = jget(req, "type");
-    if (action.empty()) {
-        // Fallback: scan for a known verb anywhere in the request.
-        static const char* verbs[] = {
-            "initialize", "is_billing_supported", "get_id_token", "get_products",
-            "get_purchases", "request_purchase_completion", "request_purchase",
-            "consume_purchase", "get_request_purchase_info", "send_analytics_event",
-            "open_app_page"};
-        for (auto v : verbs)
-            if (req.find(std::string("\"") + v + "\"") != std::string::npos) {
-                action = v; break;
-            }
-    }
+    std::string action = top_command(req);
     logf("cmd <- action=%s  json=%s", action.c_str(), req.c_str());
 
-    auto ok = [](const std::string& body) {
-        return std::string("{\"error\":null,") + body + "}";
+    // Response envelope mirrors the request: {"<command>":{ ...fields... }}.
+    // We include a top-level "error":null as well, so whichever level the SDK
+    // reads, it sees success. (Refine once we see the game's reaction.)
+    auto reply = [&](const std::string& fields) {
+        std::string inner = std::string("\"error\":null");
+        if (!fields.empty()) inner += "," + fields;
+        std::string r = "{\"error\":null,\"" + action + "\":{" + inner + "}}";
+        logf("cmd -> %s", r.c_str());
+        return r;
     };
 
     if (action == "initialize") {
-        return ok("\"result\":\"ok\",\"is_billing_supported\":false");
+        return reply(
+            "\"session\":" + jstr("preservation-session") +
+            ",\"player_id\":" + jstr(config().player_id) +
+            ",\"is_billing_supported\":false" +
+            ",\"andapp_client_version\":\"1.0.4\"");
     }
     if (action == "is_billing_supported") {
-        return ok("\"is_billing_supported\":false");
+        return reply("\"is_billing_supported\":false");
     }
     if (action == "get_id_token") {
-        return ok("\"id_token\":" + jstr(synth_id_token()) +
-                  ",\"player_id\":" + jstr(config().player_id) +
-                  ",\"public_user_id_token\":" + jstr(synth_id_token()));
+        return reply(
+            "\"id_token\":" + jstr(synth_id_token()) +
+            ",\"player_id\":" + jstr(config().player_id) +
+            ",\"public_user_id_token\":" + jstr(synth_id_token()));
     }
     if (action == "get_products") {
-        // No catalog -> store shows nothing purchasable.
-        return ok("\"items\":[],\"missingIds\":[]");
+        return reply("\"items\":[],\"missingIds\":[]");
     }
     if (action == "get_purchases") {
-        return ok("\"items\":[]");
+        return reply("\"items\":[]");
     }
     if (action == "request_purchase" || action == "request_purchase_completion" ||
         action == "consume_purchase" || action == "get_request_purchase_info") {
         // PAYMENT STUB: always decline. We never emit paymentSucceed.
         logf("payment '%s' declined (preservation build)", action.c_str());
-        return std::string(
-            "{\"error\":{\"code\":1,\"message\":\"Billing disabled "
-            "(preservation build)\"}}");
+        std::string r = "{\"error\":{\"code\":1,\"message\":\"Billing disabled "
+                        "(preservation build)\"},\"" + action + "\":{\"error\":"
+                        "{\"code\":1,\"message\":\"Billing disabled\"}}}";
+        logf("cmd -> %s", r.c_str());
+        return r;
     }
     if (action == "send_analytics_event" || action == "open_app_page") {
-        return ok("\"result\":\"ok\"");
+        return reply("");
     }
     // Unknown verb: acknowledge without error so the SDK keeps going.
-    return ok("\"result\":\"ok\"");
+    return reply("");
 }
 
 // ============================================================================
