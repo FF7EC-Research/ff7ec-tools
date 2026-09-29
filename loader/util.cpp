@@ -98,6 +98,9 @@ bool load_config(const std::wstring& ini_path) {
             if (key == "bypass") g_cfg.ssl_bypass = truthy(val);
         } else if (section == "mutex") {
             if (key == "fix") g_cfg.mutex_fix = truthy(val);
+        } else if (section == "launch") {
+            if (key == "inject_payload_id")   g_cfg.inject_payload_id = truthy(val);
+            else if (key == "andapp_payload_id") g_cfg.andapp_payload_id = val;
         } else if (section == "cef") {
             if (key == "enabled")                        g_cfg.cef_enabled = truthy(val);
             else if (key == "ignore_certificate_errors") g_cfg.cef_ignore_cert = truthy(val);

@@ -89,7 +89,7 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID) {
                  config().log_enabled);
         logf("=== AndApp preservation loader (winmm proxy) ===");
         logf("ini: %ls", ini.c_str());
-        install_cef_cmdline_hook();
+        install_cmdline_hook();
 
         // Everything else can run off the loader lock.
         CloseHandle(CreateThread(nullptr, 0, init_thread, nullptr, 0, nullptr));

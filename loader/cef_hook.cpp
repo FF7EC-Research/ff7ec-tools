@@ -74,24 +74,31 @@ std::string cef_switch_string() {
     return s;
 }
 
-void install_cef_cmdline_hook() {
-    if (!config().cef_enabled) { logf("cef: disabled"); return; }
-
-    std::string sw = cef_switch_string();
-    if (sw.empty()) { logf("cef: no switches to inject"); return; }
-    g_switches = widen(sw);
-
+void install_cmdline_hook() {
     HMODULE k32 = GetModuleHandleW(L"kernel32.dll");
     auto real = (GetCommandLineW_t)GetProcAddress(k32, "GetCommandLineW");
-    if (!real) { logf("cef: GetCommandLineW not found"); return; }
-
+    if (!real) { logf("cmdline: GetCommandLineW not found"); return; }
     LPWSTR cur = real();
     std::wstring cmd = cur ? cur : L"";
-    if (cmd.find(kMarker) != std::wstring::npos) {
-        logf("cef: command line already augmented, skipping");
-        return;
+
+    // Build what we append: payload id (for the SDK) + CEF switches (for libcef).
+    // g_switches holds ONLY the CEF switches (reused by the CreateProcessW hook
+    // for child processes; children don't need the payload id).
+    std::string cef = config().cef_enabled ? cef_switch_string() : "";
+    g_switches = widen(cef);
+
+    std::wstring append;
+    if (config().inject_payload_id &&
+        cmd.find(L"--andapp-payload-id") == std::wstring::npos) {
+        append += L" --andapp-payload-id=" + widen(config().andapp_payload_id);
+        logf("cmdline: injecting --andapp-payload-id=%s",
+             config().andapp_payload_id.c_str());
     }
-    std::wstring full = cmd + L" " + g_switches;
+    if (!cef.empty() && cmd.find(kMarker) == std::wstring::npos)
+        append += L" " + g_switches;
+
+    if (append.empty()) { logf("cmdline: nothing to inject"); return; }
+    std::wstring full = cmd + append;
 
     // Persist a copy that lives forever; GetCommandLineW must keep returning it.
     size_t bytes = (full.size() + 1) * sizeof(wchar_t);
@@ -101,9 +108,9 @@ void install_cef_cmdline_hook() {
     // GetCommandLineW just returns a pointer; force it to return ours.
     // (32-bit: the pointer fits in the mov-eax immediate.)
     if (force_return((void*)real, (uint32_t)(uintptr_t)g_fake_cmdline))
-        logf("cef: injected switches -> %s", sw.c_str());
+        logf("cmdline: patched GetCommandLineW");
     else
-        logf("cef: failed to patch GetCommandLineW");
+        logf("cmdline: failed to patch GetCommandLineW");
 }
 
 // ---- CreateProcessW: append switches to CEF child processes ------------------

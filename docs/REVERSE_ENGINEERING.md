@@ -239,6 +239,22 @@ one real SDK↔helper session:
 Until then the helper runs in pass-through (newline-framed plaintext JSON) mode
 and logs raw byte counts so its framing can be diffed against the capture.
 
+### Launch error codes ("ゲームを開始できませんでした。エラーコード N")
+
+The startup dialog reports the SDK `initialize` failure. Observed:
+
+| Code | When | Meaning |
+|---|---|---|
+| `-30005` | nothing running | SDK could not **connect to any AndAppHelper** (no listener on the loopback ports / no `AndAppHelper.cfg`). The "Could not connect to AndAppHelper" / "Send TCP handshake request failed" path. |
+| `-21015` | AndApp running, exe launched directly | SDK reached the real helper, but `initialize` was **rejected** — the game wasn't launched *by* AndApp, so it had no `--andapp-payload-id` / valid session (the helper validates `'payload_id' must be positive number`). |
+
+Both are computed at runtime (not stored constants). They confirm the stock exe
+cannot start without a working AndApp `initialize`. Fixing them is the loader's
+job: the helper replacement must (a) listen so connect succeeds (→ `-30005`) and
+(b) complete the handshake + return a successful `initialize` (→ `-21015`). The
+loader also injects `--andapp-payload-id` (`[launch]` section) since a direct
+launch lacks the arg AndApp normally supplies.
+
 ---
 
 ## 6. `manifest.json` + `signature` file — AndApp integrity (not the game's)

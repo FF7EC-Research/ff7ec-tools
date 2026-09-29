@@ -32,6 +32,12 @@ struct Config {
     // Mutex neutralization (launch without the official AndApp installed)
     bool   mutex_fix            = true;
 
+    // Standalone launch: AndApp normally passes --andapp-payload-id=<n> on the
+    // command line. Launched directly, the SDK has none and initialize fails
+    // (error -21015). Inject one so the SDK has a valid positive payload id.
+    bool   inject_payload_id    = true;
+    std::string andapp_payload_id = "1";
+
     // CEF (embedded Chromium) command-line injection for webview screens
     bool   cef_enabled          = true;   // inject switches into libcef
     bool   cef_ignore_cert      = true;   // --ignore-certificate-errors etc.
@@ -63,11 +69,12 @@ void install_dns_hooks();     // getaddrinfo / GetAddrInfoW / gethostbyname
 void install_mutex_hooks();   // CreateMutexW / CreateMutexExW
 void install_ssl_bypass();    // openssl X509_verify_cert / SSL_get_verify_result / libcurl
 
-// CEF (embedded Chromium) support.
-// Must run BEFORE cef_initialize, so it is installed synchronously in DllMain.
-void install_cef_cmdline_hook();   // inline-hook GetCommandLineW to append switches
+// Command-line injection: --andapp-payload-id (standalone launch) + CEF switches.
+// Must run BEFORE cef_initialize / SDK init, so it is installed synchronously in
+// DllMain via an inline hook on GetCommandLineW.
+void install_cmdline_hook();       // inline-hook GetCommandLineW to append args
 void install_process_hooks();      // CreateProcessW: propagate switches to CEF children
-std::string cef_switch_string();   // the switches we inject (for logging/reuse)
+std::string cef_switch_string();   // the CEF switches we inject (for logging/reuse)
 
 // ---- AndApp helper TCP server ------------------------------------------------
 void start_helper_server();   // spawns listener threads; writes AndAppHelper.cfg
