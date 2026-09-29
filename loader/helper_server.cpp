@@ -114,12 +114,16 @@ void write_helper_cfg() {
 }
 
 // ---- payment-safe response builder ------------------------------------------
-// A synthesized id token is enough for a preservation server that trusts the
+// A synthesized token is enough for a preservation server that trusts the
 // loader; for the real service it would be rejected (by design - no bypass).
+// The game forwards these to the (redirected) game server, which decides how to
+// interpret them - so an opaque string is fine for a preservation setup.
 std::string synth_id_token() {
     if (!config().id_token.empty()) return config().id_token;
-    // Opaque local token; the preservation server decides how to interpret it.
-    return "preservation." + config().player_id;
+    return "preservation.id." + config().player_id;
+}
+std::string synth_access_token() {
+    return "preservation.access." + config().player_id;
 }
 
 // The request is {"<command>":{...params...}} - the command is the sole
@@ -138,11 +142,9 @@ std::string handle_command(const std::string& req) {
     std::string action = top_command(req);
     logf("cmd <- action=%s  json=%s", action.c_str(), req.c_str());
 
-    // The SDK reads result fields at the TOP LEVEL of the response object, and
-    // only if a required field is missing does it look for a top-level "error"
-    // key (any "error" key = failure). So a success reply is FLAT with the
-    // expected fields and NO "error" key. (Confirmed by disassembly of the
-    // initialize response parser at RVA 0x0105c3a0.)
+    // Response schemas are matched to a real captured session (docs/RE §5a).
+    // Success replies are flat with the expected fields and NO "error" key;
+    // failures carry a top-level {"error":{"code","message"}}.
     auto reply = [&](const std::string& fields) {
         std::string r = "{" + fields + "}";
         logf("cmd -> %s", r.c_str());
@@ -156,25 +158,38 @@ std::string handle_command(const std::string& req) {
     };
 
     if (action == "initialize") {
-        // Required top-level keys: session, is_billing_supported,
-        // andapp_client_version (player_id included for good measure).
+        // Real shape: session is an OBJECT {access_token,id_token,player_id};
+        // plus top-level andapp_client_version / andapp_user_id /
+        // device_account_id / is_billing_supported.
         return reply(
-            "\"session\":" + jstr("preservation-session") +
-            ",\"player_id\":" + jstr(config().player_id) +
-            ",\"is_billing_supported\":false" +
-            ",\"andapp_client_version\":\"3.8.0\"");
+            "\"andapp_client_version\":\"4.0.4\""
+            ",\"andapp_user_id\":" + jstr(config().player_id) +
+            ",\"device_account_id\":" + jstr(config().player_id) +
+            ",\"is_billing_supported\":false"
+            ",\"session\":{"
+                "\"access_token\":" + jstr(synth_access_token()) +
+                ",\"id_token\":" + jstr(synth_id_token()) +
+                ",\"player_id\":" + jstr(config().player_id) + "}");
     }
     if (action == "is_billing_supported") {
         return reply("\"is_billing_supported\":false");
     }
     if (action == "get_id_token") {
+        return reply("\"id_token\":" + jstr(synth_id_token()));
+    }
+    if (action == "get_in_app_user_id") {
+        // Mirrors the id_token's links.app block.
         return reply(
-            "\"id_token\":" + jstr(synth_id_token()) +
-            ",\"player_id\":" + jstr(config().player_id) +
-            ",\"public_user_id_token\":" + jstr(synth_id_token()));
+            "\"createdAt\":0,\"updatedAt\":0,\"id\":" + jstr(config().player_id) +
+            ",\"extras\":{\"passphrase\":\"preservation\"}");
+    }
+    if (action == "send_message_to_frontend") {
+        // Portal/webview round-trip; ack with status 0, echo the request_id.
+        std::string rid = jget(req, "request_id");
+        return reply("\"request_id\":" + jstr(rid) + ",\"result\":{\"status\":0}");
     }
     if (action == "get_products") {
-        return reply("\"items\":[],\"missingIds\":[]");
+        return reply("\"items\":[]");
     }
     if (action == "get_purchases") {
         return reply("\"items\":[]");

@@ -298,8 +298,33 @@ schema gets refined.
 **Capturing more sessions.** `ipc_capture.py` (auto mode) reads the JSON cfg,
 proxies in front of the real helper, and dumps both directions; note the
 captured `0x10` payloads are encrypted to the *client's* private key, so they
-can't be decrypted offline — read the loader's own decrypted log instead, or use
-Wireshark for raw framing.
+can't be decrypted offline — read the loader's own decrypted log instead, use the
+decrypting MITM (`tools/andapp_mitm.py`), or Wireshark for raw framing.
+
+### §5a. Command/response schemas (from a real MITM capture)
+
+Requests are `{"<command>":{...params...}}`; responses are flat objects, with a
+top-level `{"error":{"code","message"}}` only on failure. Captured from a live
+FFRK session (SDK 1.1.0; FFBE uses 1.0.4 with the same shapes, a subset):
+
+| Command | Request params | Success response |
+|---|---|---|
+| `initialize` | `api_level, config:{clientId,disableLogging}, sdk_version` | `andapp_client_version`, `andapp_user_id`, `device_account_id`, `is_billing_supported`, **`session`:{`access_token`,`id_token`,`player_id`}** |
+| `get_id_token` | `{}` | `id_token` |
+| `get_in_app_user_id` | `{}` | `createdAt`, `updatedAt`, `id`, `extras`:{`passphrase`} (mirrors the id_token's `links.app`) |
+| `get_products` | `product_ids:[...]` | `items`:[ {clientId, createdAt, description, id, language, prices:[{currency,taxRate,value}], state, title, type, updatedAt} ] |
+| `get_purchases` | `{}` | `items:[]` |
+| `send_analytics_event` | `action, event, sdk_type, sdk_version, ...` | `{}` |
+| `send_message_to_frontend` | `payload:{args,operation}, request_id` | `request_id`, `result:{status:0}` (async result later on the **notification** channel: `{request_id, error:{code,message}}` or data) |
+
+Key correction: **`session` is an object** (`access_token`/`id_token`/`player_id`
+are JWTs), not a string. `id_token`/`access_token` are DeNA-signed JWTs the game
+forwards to the game server; for preservation the server we redirect to decides
+whether to accept them, so opaque tokens suffice client-side.
+
+**`-21005` "Game with same clientId is already connected"** is the real helper's
+one-instance-per-clientId guard (seen when launching a second copy). The
+replacement helper does not enforce it, so relaunching is fine.
 
 ### Launch error codes ("ゲームを開始できませんでした。エラーコード N")
 
