@@ -225,14 +225,33 @@ anyway — declining is both the honest and the robust choice.
 
 ## 5. Confirming the handshake with the packet-logging helper
 
-The patched `AndAppNextHelper.exe` (accepts any cert, logs packets) can capture
-one real SDK↔helper session:
+You need the exact wire bytes of one real SDK↔helper session. Three ways, in
+order of preference:
 
-1. Run the patched helper + game once; collect its packet log next to the game.
-2. Look at the very first bytes on the **command** socket after connect — that is
-   the handshake. Identify: any length prefix, the RSA-wrapped AES key blob, and
-   where JSON begins.
-3. Fill in `SessionCrypto::negotiate()/decode()/encode()` in
+**(a) Loopback tee proxy — [`tools/ipc_capture.py`](../tools/ipc_capture.py)
+(recommended).** It sits between the SDK and the real AndAppHelper and writes an
+annotated hex dump of both directions:
+1. Start the real AndApp client so its helper starts and writes
+   `%LOCALAPPDATA%\AndApp\AndAppHelper.cfg`.
+2. `python ipc_capture.py --cfg "%LOCALAPPDATA%\AndApp\AndAppHelper.cfg" --out handshake.log`
+   — it reads the real ports, starts proxies on `port+1000`, and rewrites the cfg
+   so the SDK connects to it and it forwards to the real helper.
+3. Launch `FF_EXVIUS.exe`. Launching directly still captures the handshake (it
+   happens before any payload/session rejection); launching via AndApp also
+   captures a fully successful `initialize`. Ctrl-C restores the cfg.
+
+**(b) Wireshark + Npcap** with loopback capture, filter
+`tcp.port == <cmd port>` (read the port from the cfg). Raw bytes, no cfg rewrite,
+but you decode framing yourself.
+
+**(c) The packet-logging `AndAppNextHelper.exe`** you already have — run the
+normal AndApp flow and read the log it drops in the game dir.
+
+Then, in the dump:
+1. The very first bytes on the **command** socket after connect are the
+   handshake. Identify: any length prefix, the RSA-wrapped AES key blob
+   (CryptExportKey output), and where JSON begins.
+2. Fill in `SessionCrypto::negotiate()/decode()/encode()` in
    `loader/helper_server.cpp` to match (framing + AES-128-CBC with the negotiated
    key). The JSON verb handlers above it are already complete.
 

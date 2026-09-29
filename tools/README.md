@@ -32,6 +32,20 @@ game's DLLs. Both do the same two no-ops.
 > These only affect the local client you own; they are not for intercepting
 > anyone else's traffic.
 
+## `ipc_capture.py`
+Capture the SDK↔AndAppHelper handshake by proxying loopback TCP and writing an
+annotated hex dump of both directions — the input for completing the helper's
+`SessionCrypto` (see [`../docs/REVERSE_ENGINEERING.md`](../docs/REVERSE_ENGINEERING.md) §5).
+
+```
+# Auto: read the real ports from the cfg, proxy in front of the real helper
+python ipc_capture.py --cfg "%LOCALAPPDATA%\AndApp\AndAppHelper.cfg" --out handshake.log
+# Manual: fixed listen->target port
+python ipc_capture.py --listen 52100 --target 51100 --tag cmd --out handshake.log
+```
+Start real AndApp first (so the helper + cfg exist), run this, then launch the
+game. Ctrl-C restores the cfg. Stdlib only.
+
 ## manifest.json / `signature` (no tool — by design)
 `manifest.json`'s `signature[]` and the sibling `signature` file are 64-byte
 **asymmetric** signatures (ECDSA-P256/Ed25519, DeNA private key) and **cannot be
