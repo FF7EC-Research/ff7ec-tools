@@ -265,40 +265,41 @@ anyway — declining is both the honest and the robust choice.
 
 ---
 
-## 5. Confirming the handshake with the packet-logging helper
+## 5. Session handshake & framing (recovered from a live capture)
 
-You need the exact wire bytes of one real SDK↔helper session. Three ways, in
-order of preference:
+A loopback capture ([`tools/ipc_capture.py`](../tools/ipc_capture.py)) of a real
+SDK↔helper session revealed the full protocol, now **implemented** in
+`loader/helper_server.cpp` (`SessionCrypto`).
 
-**(a) Loopback tee proxy — [`tools/ipc_capture.py`](../tools/ipc_capture.py)
-(recommended).** It sits between the SDK and the real AndAppHelper and writes an
-annotated hex dump of both directions:
-1. Start the real AndApp client so its helper starts and writes
-   `%APPDATA%\AndApp\AndAppHelper.cfg`.
-2. `python ipc_capture.py --cfg "%APPDATA%\AndApp\AndAppHelper.cfg" --out handshake.log`
-   — it reads the real ports, starts proxies on `port+1000`, and rewrites the cfg
-   so the SDK connects to it and it forwards to the real helper.
-3. Launch `FF_EXVIUS.exe`. Launching directly still captures the handshake (it
-   happens before any payload/session rejection); launching via AndApp also
-   captures a fully successful `initialize`. Ctrl-C restores the cfg.
+**Framing.** Every message is `[4-byte BE opcode][4-byte BE length][payload]`.
 
-**(b) Wireshark + Npcap** with loopback capture, filter
-`tcp.port == <cmd port>` (read the port from the cfg). Raw bytes, no cfg rewrite,
-but you decode framing yourself.
+**Handshake** (performed on *both* the command and notification sockets):
 
-**(c) The packet-logging `AndAppNextHelper.exe`** you already have — run the
-normal AndApp flow and read the log it drops in the game dir.
+| Op | Dir | Payload |
+|---|---|---|
+| `1` | C→S | Client **RSA-1024 public key**, a CryptoAPI `PUBLICKEYBLOB` (`06 02 00 00` header, `aiKeyAlg=CALG_RSA_KEYX`, magic `RSA1`, `bitlen=0x400`, `exp=0x10001`, 128-byte modulus). |
+| `2` | S→C | **AES-256 session key** as a CryptoAPI `SIMPLEBLOB` (`01 02 00 00` header, `aiKeyAlg=CALG_AES_256 0x6610`, key-exchange `CALG_RSA_KEYX`, 128-byte RSA-encrypted key). |
+| `3` | C→S | Plaintext JSON `{"clientid":"<appId>"}`. |
+| `4` | S→C | Single `0x00` byte (ack). |
 
-Then, in the dump:
-1. The very first bytes on the **command** socket after connect are the
-   handshake. Identify: any length prefix, the RSA-wrapped AES key blob
-   (CryptExportKey output), and where JSON begins.
-2. Fill in `SessionCrypto::negotiate()/decode()/encode()` in
-   `loader/helper_server.cpp` to match (framing + AES-128-CBC with the negotiated
-   key). The JSON verb handlers above it are already complete.
+**Application data.** Opcode `0x10` both ways; payload is **AES-256-CBC**
+(IV = 0, PKCS7 padding, block-aligned, no prepended IV) ciphertext of the JSON
+command/response. The command socket is strictly request/response; the
+notification socket can be pushed to (we stay idle).
 
-Until then the helper runs in pass-through (newline-framed plaintext JSON) mode
-and logs raw byte counts so its framing can be diffed against the capture.
+**Why no secret is needed.** The client sends *its* public key and trusts
+whatever AES key comes back — the server is never authenticated. So the
+replacement mints its own AES-256 key with CryptoAPI ("Microsoft Enhanced RSA and
+AES Cryptographic Provider", matching the game) and returns it encrypted to the
+client's key. Because the replacement holds the key, it **decrypts and logs every
+request** (`andapp_loader.log`), which is how the exact request/response JSON
+schema gets refined.
+
+**Capturing more sessions.** `ipc_capture.py` (auto mode) reads the JSON cfg,
+proxies in front of the real helper, and dumps both directions; note the
+captured `0x10` payloads are encrypted to the *client's* private key, so they
+can't be decrypted offline — read the loader's own decrypted log instead, or use
+Wireshark for raw framing.
 
 ### Launch error codes ("ゲームを開始できませんでした。エラーコード N")
 

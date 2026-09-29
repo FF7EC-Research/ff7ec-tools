@@ -34,10 +34,14 @@ helper never fabricates a successful payment or entitlement.
    server; leave `[helper]`, `[ssl]`, `[mutex]` enabled.
 4. **Run `FF_EXVIUS.exe`.** Read `andapp_loader.log` to see what happened.
 
-## Known open item
-The SDK↔helper **session handshake crypto** (RSA-wrapped AES) is isolated in one
-seam in `loader/helper_server.cpp`; complete it from a capture taken with the
-packet-logging helper (see `docs/REVERSE_ENGINEERING.md` §5). Everything else —
-CCZ decryption, the JSON command layer, payment stub, DNS redirect, SSL bypass,
-mutex fix, and the winmm proxy — is implemented and, for the loader, compiles to
-a clean 32-bit drop-in DLL.
+## Status
+The SDK↔helper **session handshake is implemented** (`loader/helper_server.cpp`):
+8-byte framing + a CryptoAPI RSA/AES key exchange + AES-256-CBC JSON, reconstructed
+from a live capture (`docs/REVERSE_ENGINEERING.md` §5). CCZ decryption, the JSON
+command layer, payment stub, DNS redirect, SSL/pinning bypass, CEF switches, mutex
+fix and the winmm proxy are all done, and the loader compiles to a clean 32-bit
+drop-in DLL.
+
+What remains is refining the **response JSON schema**: the helper holds the session
+key and logs every *decrypted* request to `andapp_loader.log`, so one run of the
+game reveals the exact fields each verb must return.

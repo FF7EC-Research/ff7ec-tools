@@ -73,10 +73,14 @@ SSL patches, and raw command bytes.
 | `helper_server.cpp` | AndAppHelper TCP replacement (payments stubbed) |
 | `andapp_loader.ini` | configuration |
 
-## Status / limitation
-The SDK↔helper **session handshake crypto** is isolated in one `SessionCrypto`
-seam in `helper_server.cpp`. The default build speaks plaintext newline-framed
-JSON and logs raw bytes. If the SDK requires the encrypted handshake, capture
-one real session with the packet-logging helper and complete that seam — see
-[`../docs/REVERSE_ENGINEERING.md`](../docs/REVERSE_ENGINEERING.md) §5. All JSON
-verbs, the payment stub, DNS, mutex, and SSL pieces are complete.
+## Status
+The SDK↔helper **session handshake is implemented** (`SessionCrypto` in
+`helper_server.cpp`): the recovered 8-byte framing, the CryptoAPI RSA/AES key
+exchange (client sends its RSA public key, we return a minted AES-256 key), and
+AES-256-CBC JSON commands — see
+[`../docs/REVERSE_ENGINEERING.md`](../docs/REVERSE_ENGINEERING.md) §5. DNS, mutex,
+SSL/pinning, CEF, and the payment stub are complete.
+
+Remaining: the **response JSON schema** is a best effort. Because the helper holds
+the session key it logs every *decrypted* request to `andapp_loader.log`, so run
+the game once and read that log to refine the exact fields each verb must return.

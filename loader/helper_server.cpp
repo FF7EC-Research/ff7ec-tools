@@ -19,20 +19,23 @@
 //   * A handshake before commands (DeNASessionImpl): the SDK generates an AES
 //     session key and RSA-wraps it. See SessionCrypto below.
 //
-// IMPORTANT - session crypto is transport-confirmed, not guessed:
-//   The exact handshake framing/crypto could not be fully recovered statically
-//   from the 8 MB Envoy-based official helper. This file implements the JSON
-//   command layer and a pluggable SessionCrypto seam. Use the provided
-//   packet-logging helper (AndAppNextHelper.exe patched build) to capture one
-//   real handshake, then fill in SessionCrypto::negotiate()/decode()/encode().
-//   Everything above that seam (verbs, payment stub, notifications) is done.
+// Session crypto is IMPLEMENTED from a live capture (see SessionCrypto below and
+// docs/REVERSE_ENGINEERING.md §5): 8-byte framed messages, a CryptoAPI RSA/AES
+// handshake where the client sends its RSA public key and we return a minted
+// AES-256 key, then AES-256-CBC JSON commands. No secret from the real helper is
+// needed. The response JSON schema is a best effort; because we hold the key the
+// helper now logs each DECRYPTED request, so the exact schema can be refined by
+// reading andapp_loader.log after a run.
 //
 #include "loader.h"
 #include <ws2tcpip.h>
+#include <wincrypt.h>
 #include <thread>
 #include <string>
+#include <vector>
 #include <cstdlib>
 #pragma comment(lib, "ws2_32.lib")
+#pragma comment(lib, "advapi32.lib")
 
 namespace loader {
 namespace {
@@ -116,7 +119,20 @@ std::string synth_id_token() {
 std::string handle_command(const std::string& req) {
     std::string action = jget(req, "action");
     if (action.empty()) action = jget(req, "command");
-    logf("cmd <- action=%s", action.c_str());
+    if (action.empty()) action = jget(req, "type");
+    if (action.empty()) {
+        // Fallback: scan for a known verb anywhere in the request.
+        static const char* verbs[] = {
+            "initialize", "is_billing_supported", "get_id_token", "get_products",
+            "get_purchases", "request_purchase_completion", "request_purchase",
+            "consume_purchase", "get_request_purchase_info", "send_analytics_event",
+            "open_app_page"};
+        for (auto v : verbs)
+            if (req.find(std::string("\"") + v + "\"") != std::string::npos) {
+                action = v; break;
+            }
+    }
+    logf("cmd <- action=%s  json=%s", action.c_str(), req.c_str());
 
     auto ok = [](const std::string& body) {
         return std::string("{\"error\":null,") + body + "}";
@@ -156,25 +172,130 @@ std::string handle_command(const std::string& req) {
 }
 
 // ============================================================================
-// SessionCrypto - the ONE seam to confirm against a captured handshake.
-// Default build is pass-through (plaintext JSON, newline-framed). If the SDK
-// requires the encrypted handshake, capture it with the packet-logging helper
-// and implement negotiate()/decode()/encode() here (AES-128-CBC session key,
-// RSA-wrapped during negotiate; see docs/REVERSE_ENGINEERING.md).
+// Wire protocol (recovered from a live capture; see docs/REVERSE_ENGINEERING.md):
+//   Frame = [4-byte BE opcode][4-byte BE length][payload]
+//   Handshake (on BOTH the command and notification sockets):
+//     op 1  C->S  client RSA-1024 public key   (CryptoAPI PUBLICKEYBLOB)
+//     op 2  S->C  AES-256 session key           (SIMPLEBLOB, RSA-encrypted to it)
+//     op 3  C->S  plaintext JSON {"clientid":"..."}
+//     op 4  S->C  single 0x00 byte (ack)
+//   Application data:
+//     op 0x10  both ways  AES-256-CBC (IV=0, PKCS7) ciphertext of JSON
+// The client does not authenticate the server, so we mint our own AES key and
+// send it encrypted to the client's public key - no secret from the real helper
+// is required. Holding the key also lets us log the decrypted request JSON.
 // ============================================================================
-struct SessionCrypto {
-    bool negotiate(SOCKET s) {
-        (void)s;
-        return true;  // TODO: perform RSA/AES handshake if the capture shows one
+constexpr uint32_t OP_CLIENT_PUBKEY = 1;
+constexpr uint32_t OP_SERVER_AESKEY = 2;
+constexpr uint32_t OP_CLIENT_HELLO  = 3;
+constexpr uint32_t OP_SERVER_ACK    = 4;
+constexpr uint32_t OP_DATA          = 0x10;
+
+bool recv_all(SOCKET s, char* buf, int n) {
+    int got = 0;
+    while (got < n) {
+        int r = recv(s, buf + got, n - got, 0);
+        if (r <= 0) return false;
+        got += r;
     }
-    // Turn one inbound frame into a JSON request string.
-    bool decode(const std::string& frame, std::string& json_out) {
-        json_out = frame;  // TODO: AES-decrypt if encrypted
+    return true;
+}
+
+bool read_frame(SOCKET s, uint32_t& op, std::string& payload) {
+    unsigned char h[8];
+    if (!recv_all(s, (char*)h, 8)) return false;
+    op = (h[0] << 24) | (h[1] << 16) | (h[2] << 8) | h[3];
+    uint32_t len = (h[4] << 24) | (h[5] << 16) | (h[6] << 8) | h[7];
+    if (len > 64 * 1024 * 1024) return false;
+    payload.resize(len);
+    return len == 0 || recv_all(s, &payload[0], (int)len);
+}
+
+bool send_frame(SOCKET s, uint32_t op, const std::string& payload) {
+    unsigned char h[8];
+    uint32_t len = (uint32_t)payload.size();
+    h[0] = op >> 24; h[1] = op >> 16; h[2] = op >> 8; h[3] = op;
+    h[4] = len >> 24; h[5] = len >> 16; h[6] = len >> 8; h[7] = len;
+    if (send(s, (char*)h, 8, 0) != 8) return false;
+    return len == 0 || send(s, payload.data(), (int)len, 0) == (int)len;
+}
+
+struct SessionCrypto {
+    HCRYPTPROV prov = 0;
+    HCRYPTKEY  aes = 0;
+    bool ok = false;
+
+    ~SessionCrypto() {
+        if (aes) CryptDestroyKey(aes);
+        if (prov) CryptReleaseContext(prov, 0);
+    }
+
+    void zero_iv() {
+        BYTE iv[16] = {0};
+        CryptSetKeyParam(aes, KP_IV, iv, 0);
+    }
+
+    bool negotiate(SOCKET s) {
+        if (!CryptAcquireContextW(
+                &prov, nullptr,
+                L"Microsoft Enhanced RSA and AES Cryptographic Provider",
+                PROV_RSA_AES, CRYPT_VERIFYCONTEXT)) {
+            logf("crypto: CryptAcquireContext failed %lu", GetLastError());
+            return false;
+        }
+        uint32_t op; std::string p;
+        if (!read_frame(s, op, p) || op != OP_CLIENT_PUBKEY) return false;
+        HCRYPTKEY client = 0;
+        if (!CryptImportKey(prov, (const BYTE*)p.data(), (DWORD)p.size(), 0, 0,
+                            &client)) {
+            logf("crypto: import client pubkey failed %lu", GetLastError());
+            return false;
+        }
+        if (!CryptGenKey(prov, CALG_AES_256, CRYPT_EXPORTABLE, &aes)) {
+            logf("crypto: gen AES key failed %lu", GetLastError());
+            CryptDestroyKey(client); return false;
+        }
+        DWORD mode = CRYPT_MODE_CBC;
+        CryptSetKeyParam(aes, KP_MODE, (BYTE*)&mode, 0);
+        zero_iv();
+        DWORD blen = 0;
+        CryptExportKey(aes, client, SIMPLEBLOB, 0, nullptr, &blen);
+        std::string blob(blen, '\0');
+        BOOL e = CryptExportKey(aes, client, SIMPLEBLOB, 0, (BYTE*)&blob[0], &blen);
+        CryptDestroyKey(client);
+        if (!e) { logf("crypto: export AES key failed %lu", GetLastError()); return false; }
+        blob.resize(blen);
+        if (!send_frame(s, OP_SERVER_AESKEY, blob)) return false;
+        if (!read_frame(s, op, p) || op != OP_CLIENT_HELLO) return false;
+        logf("crypto: client hello %s", p.c_str());
+        if (!send_frame(s, OP_SERVER_ACK, std::string(1, '\0'))) return false;
+        ok = true;
+        logf("crypto: session established");
         return true;
     }
-    // Turn a JSON response into an outbound frame.
-    std::string encode(const std::string& json) {
-        return json + "\n";  // TODO: AES-encrypt + length-prefix if required
+
+    bool decrypt(const std::string& ct, std::string& out) {
+        std::vector<BYTE> buf(ct.begin(), ct.end());
+        DWORD len = (DWORD)buf.size();
+        zero_iv();
+        if (!CryptDecrypt(aes, 0, TRUE, 0, buf.data(), &len)) {
+            logf("crypto: decrypt failed %lu", GetLastError());
+            return false;
+        }
+        out.assign((char*)buf.data(), len);
+        return true;
+    }
+
+    std::string encrypt(const std::string& pt) {
+        std::vector<BYTE> buf(pt.begin(), pt.end());
+        buf.resize(((pt.size() / 16) + 1) * 16, 0);  // room for PKCS7 padding
+        DWORD len = (DWORD)pt.size();
+        zero_iv();
+        if (!CryptEncrypt(aes, 0, TRUE, 0, buf.data(), &len, (DWORD)buf.size())) {
+            logf("crypto: encrypt failed %lu", GetLastError());
+            return std::string();
+        }
+        return std::string((char*)buf.data(), len);
     }
 };
 
@@ -200,25 +321,29 @@ SOCKET listen_on(int port) {
 void command_client(SOCKET c) {
     SessionCrypto crypto;
     if (!crypto.negotiate(c)) { closesocket(c); return; }
-    std::string buf;
-    char tmp[4096];
     for (;;) {
-        int n = recv(c, tmp, sizeof(tmp), 0);
-        if (n <= 0) break;
-        // Log raw bytes so a real capture can be diffed against our framing.
-        logf("cmd raw %d bytes", n);
-        buf.append(tmp, n);
-        size_t nl;
-        while ((nl = buf.find('\n')) != std::string::npos) {
-            std::string frame = buf.substr(0, nl);
-            buf.erase(0, nl + 1);
-            if (!frame.empty() && frame.back() == '\r') frame.pop_back();
-            if (frame.empty()) continue;
-            std::string json;
-            if (!crypto.decode(frame, json)) continue;
-            std::string resp = crypto.encode(handle_command(json));
-            send(c, resp.data(), (int)resp.size(), 0);
-        }
+        uint32_t op; std::string payload;
+        if (!read_frame(c, op, payload)) break;
+        if (op != OP_DATA) { logf("cmd: unexpected opcode %u", op); continue; }
+        std::string json;
+        if (!crypto.decrypt(payload, json)) break;
+        std::string resp = handle_command(json);
+        std::string ct = crypto.encrypt(resp);
+        if (ct.empty() || !send_frame(c, OP_DATA, ct)) break;
+    }
+    closesocket(c);
+}
+
+void notification_client(SOCKET c) {
+    // The notification channel does the same handshake, then the server may push
+    // op 0x10 messages. For a basic preservation launch we complete the
+    // handshake and stay idle (we never push paymentSucceed). Drain and discard.
+    SessionCrypto crypto;
+    if (!crypto.negotiate(c)) { closesocket(c); return; }
+    logf("notification channel established");
+    for (;;) {
+        uint32_t op; std::string payload;
+        if (!read_frame(c, op, payload)) break;
     }
     closesocket(c);
 }
@@ -229,19 +354,7 @@ void accept_loop(int port, bool is_command) {
     for (;;) {
         SOCKET c = accept(srv, nullptr, nullptr);
         if (c == INVALID_SOCKET) break;
-        if (is_command) {
-            std::thread(command_client, c).detach();
-        } else {
-            // Notification channel: keep open; push messages here as needed
-            // (e.g. application/active on focus). We never push paymentSucceed.
-            logf("notification client connected");
-            // Hold the socket; a real build would push framed notifications.
-            std::thread([c] {
-                char t[512];
-                while (recv(c, t, sizeof(t), 0) > 0) {}
-                closesocket(c);
-            }).detach();
-        }
+        std::thread(is_command ? command_client : notification_client, c).detach();
     }
     closesocket(srv);
 }
