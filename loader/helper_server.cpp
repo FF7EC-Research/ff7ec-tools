@@ -5,13 +5,17 @@
 // desktop client, while making purchases impossible (never fake a success).
 //
 // What the SDK expects (recovered from FF_EXVIUS.exe + AndAppNextHelper):
-//   * Config file  %APPDATA%\AndApp\AndAppHelper.cfg  with the TCP ports:
-//        standard.tcp.command.ipv4.port      = <cmd>
-//        standard.tcp.notification.ipv4.port = <ntf>
+//   * Config file  %APPDATA%\AndApp\AndAppHelper.cfg  - a single-line JSON object:
+//        {"standard.tcp.command.ipv4.port":<cmd>,"standard.tcp.command.ipv6.port":0,
+//         "standard.tcp.notification.ipv4.port":<ntf>,"standard.tcp.notification.ipv6.port":0}
+//     (the genuine helper also lists a "standard.command.pipe.name" named pipe;
+//      we omit it so the SDK uses the TCP channel.)
 //   * A "command" socket (request/response) and a "notification" socket (push),
 //     both on 127.0.0.1, carrying JSON messages with an "action" field:
 //        initialize, get_id_token, get_products, request_purchase,
 //        consume_purchase, get_purchases, send_analytics_event, ...
+//     A real launch's SDK sequence (from AndAppHelperDebug.txt) is:
+//        initialize -> send_analytics_event -> get_id_token
 //   * A handshake before commands (DeNASessionImpl): the SDK generates an AES
 //     session key and RSA-wraps it. See SessionCrypto below.
 //
@@ -85,12 +89,18 @@ void write_helper_cfg() {
     std::wstring path = dir + L"\\AndAppHelper.cfg";
     FILE* f = _wfopen(path.c_str(), L"wb");
     if (!f) { logf("cfg: cannot write %ls", path.c_str()); return; }
-    fprintf(f, "standard.tcp.command.ipv4.port=%d\r\n", config().command_port);
-    fprintf(f, "standard.tcp.notification.ipv4.port=%d\r\n", config().notification_port);
-    fprintf(f, "standard.tcp.command.ipv6.port=%d\r\n", config().command_port);
-    fprintf(f, "standard.tcp.notification.ipv6.port=%d\r\n", config().notification_port);
+    // Real format is a single-line JSON object. The genuine helper also lists a
+    // "standard.command.pipe.name" (\\.\pipe\AndAppNextHelper-<hash>); we omit it
+    // so the SDK falls back to the TCP command channel we implement. ipv6 = 0
+    // means "not listening", matching the real cfg.
+    fprintf(f,
+        "{\"standard.tcp.command.ipv4.port\":%d,"
+        "\"standard.tcp.command.ipv6.port\":0,"
+        "\"standard.tcp.notification.ipv4.port\":%d,"
+        "\"standard.tcp.notification.ipv6.port\":0}",
+        config().command_port, config().notification_port);
     fclose(f);
-    logf("cfg: wrote %ls (cmd=%d ntf=%d)", path.c_str(),
+    logf("cfg: wrote %ls (JSON, cmd=%d ntf=%d, TCP only)", path.c_str(),
          config().command_port, config().notification_port);
 }
 

@@ -90,13 +90,19 @@ is game build **10.0.0**.
 ### Transport
 The SDK is a TCP client to **127.0.0.1**. It discovers the ports from:
 
+`%APPDATA%\AndApp\AndAppHelper.cfg` (roaming; or `\AndAppDev\AndAppDevHelper.cfg`).
+The real file is a **single-line JSON object** (confirmed from a live cfg), with
+**dynamic** ports chosen per launch and an optional **named-pipe** command channel:
+
+```json
+{"standard.command.pipe.name":"\\\\.\\pipe\\AndAppNextHelper-<40-hex>",
+ "standard.tcp.command.ipv4.port":52903,"standard.tcp.command.ipv6.port":0,
+ "standard.tcp.notification.ipv4.port":52904,"standard.tcp.notification.ipv6.port":0}
 ```
-%APPDATA%\AndApp\AndAppHelper.cfg      (roaming; or \AndAppDev\AndAppDevHelper.cfg)
-    standard.tcp.command.ipv4.port      = <cmd>
-    standard.tcp.notification.ipv4.port = <ntf>
-    standard.tcp.command.ipv6.port      = ...
-    standard.tcp.notification.ipv6.port = ...
-```
+
+`ipv6.port` = 0 means "not listening". The SDK can use the named pipe or the TCP
+command channel; our replacement writes JSON with **only** the TCP ports (pipe
+name omitted) so the SDK uses TCP.
 
 Path confirmed from both sides: the game reads it via `SHGetFolderPathW` with
 `CSIDL_APPDATA` (`0x1a`, **roaming** `%APPDATA%`) at RVA `0x01052b4f`, and the
@@ -107,6 +113,24 @@ variable"). `CSIDL_LOCAL_APPDATA` (`0x1c`) is used only for bulk `GameData` /
 Two channels: a **command** socket (request/response) and a **notification**
 socket (server push). On failure the SDK logs `Could not connect to
 AndAppHelper` / `Send TCP handshake request failed`.
+
+**Observed live session** (from `AndAppHelperDebug.txt`). The helper's core is a
+"HeadlessMaster" (HM — matching the game's `SessionManager get HM's response`
+strings). It serves two command classes:
+* **PortalApp** channel (AndApp itself, runs persistently): `initialize`,
+  `get_andapp_client_access_token`, `update_andapp_user_access_token` (hourly
+  token refresh) — the account/token plumbing.
+* **SDK** channel (the game). A real FFBE launch logs exactly:
+  ```
+  Receive SDK 'initialize' command
+  Receive SDK 'send_analytics_event' command
+  Receive SDK 'get_id_token' command
+  ```
+  i.e. `initialize` → `send_analytics_event` → `get_id_token`. Our replacement
+  helper answers all three (and returns billing-unsupported), so this sequence is
+  covered once the session handshake (below) is in place. The debug log records
+  only command *names*, not the encrypted payloads, so a byte capture (§5) is
+  still needed for the handshake framing.
 
 > **Why running `AndAppNextHelper.exe` by hand doesn't create the cfg.** The
 > helper is normally spawned by the launcher (`AndAppNext.exe`) with arguments

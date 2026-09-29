@@ -115,19 +115,28 @@ def serve(listen_port, target_host, target_port, tag):
 
 
 def parse_cfg(path):
-    ports = {}
-    for line in open(path, "r", encoding="utf-8", errors="replace"):
-        line = line.strip()
-        if "=" in line:
-            k, v = line.split("=", 1)
-            ports[k.strip()] = v.strip()
-    return ports
+    # Real cfg is a single-line JSON object, e.g.
+    #   {"standard.command.pipe.name":"\\\\.\\pipe\\AndAppNextHelper-<hash>",
+    #    "standard.tcp.command.ipv4.port":52903, ... }
+    # Fall back to key=value for older/hand-written cfgs.
+    import json
+    text = open(path, "r", encoding="utf-8", errors="replace").read().strip()
+    try:
+        return json.loads(text)
+    except ValueError:
+        cfg = {}
+        for line in text.splitlines():
+            if "=" in line:
+                k, v = line.split("=", 1)
+                v = v.strip()
+                cfg[k.strip()] = int(v) if v.isdigit() else v
+        return cfg
 
 
-def write_cfg(path, ports):
-    with open(path, "w", encoding="utf-8", newline="\r\n") as f:
-        for k, v in ports.items():
-            f.write("%s=%s\n" % (k, v))
+def write_cfg(path, cfg):
+    import json
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(cfg, f, separators=(",", ":"), ensure_ascii=False)
 
 
 def main(argv):
@@ -161,12 +170,12 @@ def main(argv):
                          daemon=True).start()
         time.sleep(0.3)
         rewritten = dict(original)
-        rewritten[cmd_key] = str(new_cmd)
-        rewritten[ntf_key] = str(new_ntf)
-        for k in ("standard.tcp.command.ipv6.port",
-                  "standard.tcp.notification.ipv6.port"):
-            if k in rewritten:
-                rewritten[k] = str(int(original[k]) + args.delta)
+        rewritten[cmd_key] = new_cmd          # JSON numbers, not strings
+        rewritten[ntf_key] = new_ntf
+        # Drop the named-pipe channel so the SDK uses our TCP proxy (not the real
+        # helper's pipe, which would bypass the capture). Leave ipv6 (=0) as-is.
+        rewritten.pop("standard.command.pipe.name", None)
+        rewritten.pop("standard.notification.pipe.name", None)
         write_cfg(cfg_path, rewritten)
         log("# cfg rewritten to proxy ports cmd=%d ntf=%d" % (new_cmd, new_ntf))
         print("Proxy up. cfg points the SDK at %d/%d -> real %d/%d."
