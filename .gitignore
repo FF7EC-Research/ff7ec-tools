@@ -1,0 +1,13 @@
+# build artifacts
+loader/build/
+*.dll
+*.obj
+*.o
+*.exp
+*.lib
+*.pdb
+*.ilk
+andapp_loader.log
+# local binaries / captures (do not commit copyrighted game files)
+*.exe
+*.bak
