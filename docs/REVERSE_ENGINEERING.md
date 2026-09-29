@@ -200,7 +200,8 @@ The client's server hostnames, to point at a preservation server via `[dns]`:
 | Host | Role |
 |---|---|
 | `v53-ios.game.exvius.com` | game API / session |
-| `v53.notice.exvius.com`   | notices / news |
+| `v53.notice.exvius.com`   | notices / news (versioned) |
+| `notice.exvius.com`       | notices / news (unversioned) |
 | `cdn.resource.exvius.com` | asset CDN (masters, images, …) |
 
 (`v53` is the API version prefix; it advances with major game versions.) The game also has server-side reverify flags (`ForcePurchaseReverify`,
