@@ -5,7 +5,7 @@
 // desktop client, while making purchases impossible (never fake a success).
 //
 // What the SDK expects (recovered from FF_EXVIUS.exe + AndAppNextHelper):
-//   * Config file  %LOCALAPPDATA%\AndApp\AndAppHelper.cfg  with the TCP ports:
+//   * Config file  %APPDATA%\AndApp\AndAppHelper.cfg  with the TCP ports:
 //        standard.tcp.command.ipv4.port      = <cmd>
 //        standard.tcp.notification.ipv4.port = <ntf>
 //   * A "command" socket (request/response) and a "notification" socket (push),
@@ -71,14 +71,16 @@ std::string jget(const std::string& json, const std::string& key) {
 }
 
 // ---- config file the SDK reads to find our ports ----------------------------
-std::wstring localappdata() {
+std::wstring appdata() {
+    // Roaming %APPDATA% - the game reads AndAppHelper.cfg via SHGetFolderPathW
+    // with CSIDL_APPDATA (0x1a), and the real helper writes it there too.
     wchar_t buf[MAX_PATH]{};
-    DWORD n = GetEnvironmentVariableW(L"LOCALAPPDATA", buf, MAX_PATH);
+    DWORD n = GetEnvironmentVariableW(L"APPDATA", buf, MAX_PATH);
     return (n > 0 && n < MAX_PATH) ? std::wstring(buf) : std::wstring();
 }
 
 void write_helper_cfg() {
-    std::wstring dir = localappdata() + L"\\AndApp";
+    std::wstring dir = appdata() + L"\\AndApp";
     CreateDirectoryW(dir.c_str(), nullptr);
     std::wstring path = dir + L"\\AndAppHelper.cfg";
     FILE* f = _wfopen(path.c_str(), L"wb");

@@ -22,7 +22,7 @@ struct Config {
     bool   helper_enabled       = true;
     int    command_port         = 51100;         // standard.tcp.command.ipv4.port
     int    notification_port    = 51101;         // standard.tcp.notification.ipv4.port
-    bool   write_cfg            = true;          // write %LOCALAPPDATA%\AndApp\AndAppHelper.cfg
+    bool   write_cfg            = true;          // write %APPDATA%\AndApp\AndAppHelper.cfg
     std::string player_id       = "1000000000000000";
     std::string id_token;                        // optional pre-baked token; else synthesized
 

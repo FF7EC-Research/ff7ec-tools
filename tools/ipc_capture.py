@@ -3,7 +3,7 @@
 ipc_capture.py - Capture the FFBE SDK <-> AndAppHelper handshake/traffic.
 
 The SDK connects to 127.0.0.1 on the ports listed in
-    %LOCALAPPDATA%\\AndApp\\AndAppHelper.cfg
+    %APPDATA%\\AndApp\\AndAppHelper.cfg
       standard.tcp.command.ipv4.port      = <cmd>
       standard.tcp.notification.ipv4.port = <ntf>
 This tool sits in the middle: it listens on NEW loopback ports, rewrites the cfg
@@ -15,7 +15,7 @@ TWO MODES
 ---------
 1) Auto (recommended) - discover real ports from the cfg, proxy in front of it:
 
-     python ipc_capture.py --cfg "%LOCALAPPDATA%\\AndApp\\AndAppHelper.cfg" \
+     python ipc_capture.py --cfg "%APPDATA%\\AndApp\\AndAppHelper.cfg" \
                            --out handshake.log
 
    Order of operations on Windows:

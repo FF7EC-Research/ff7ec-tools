@@ -39,7 +39,7 @@ annotated hex dump of both directions — the input for completing the helper's
 
 ```
 # Auto: read the real ports from the cfg, proxy in front of the real helper
-python ipc_capture.py --cfg "%LOCALAPPDATA%\AndApp\AndAppHelper.cfg" --out handshake.log
+python ipc_capture.py --cfg "%APPDATA%\AndApp\AndAppHelper.cfg" --out handshake.log
 # Manual: fixed listen->target port
 python ipc_capture.py --listen 52100 --target 51100 --tag cmd --out handshake.log
 ```

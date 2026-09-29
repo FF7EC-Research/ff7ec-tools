@@ -91,16 +91,34 @@ is game build **10.0.0**.
 The SDK is a TCP client to **127.0.0.1**. It discovers the ports from:
 
 ```
-%LOCALAPPDATA%\AndApp\AndAppHelper.cfg      (or \AndAppDev\AndAppDevHelper.cfg)
+%APPDATA%\AndApp\AndAppHelper.cfg      (roaming; or \AndAppDev\AndAppDevHelper.cfg)
     standard.tcp.command.ipv4.port      = <cmd>
     standard.tcp.notification.ipv4.port = <ntf>
     standard.tcp.command.ipv6.port      = ...
     standard.tcp.notification.ipv6.port = ...
 ```
 
+Path confirmed from both sides: the game reads it via `SHGetFolderPathW` with
+`CSIDL_APPDATA` (`0x1a`, **roaming** `%APPDATA%`) at RVA `0x01052b4f`, and the
+`AndAppNextHelper` resolves `%APPDATA%` too ("Could not get APPDATA environment
+variable"). `CSIDL_LOCAL_APPDATA` (`0x1c`) is used only for bulk `GameData` /
+`GameCache`, not the cfg.
+
 Two channels: a **command** socket (request/response) and a **notification**
 socket (server push). On failure the SDK logs `Could not connect to
 AndAppHelper` / `Send TCP handshake request failed`.
+
+> **Why running `AndAppNextHelper.exe` by hand doesn't create the cfg.** The
+> helper is normally spawned by the launcher (`AndAppNext.exe`) with arguments
+> (`--appId=`, `--clientId=`, `--pipeConnectionRequest`, …); launched bare it
+> doesn't open the listeners or write the cfg. It also embeds an RSA key pair +
+> certificates (used for the session handshake / its local TLS) and keeps state
+> in `%APPDATA%\AndApp\` as `andapphelper.pid` and `andapphelper_*.prefs`. To get
+> a real cfg + capture, run the full AndApp client and launch FFBE through it —
+> the cfg then appears under `%APPDATA%\AndApp\`.
+
+> Note: the `\\.\pipe\crashpad_*` named pipe belongs to the bundled Crashpad
+> crash handler, **not** the AndApp IPC.
 
 > Note: the `\\.\pipe\crashpad_*` named pipe belongs to the bundled Crashpad
 > crash handler, **not** the AndApp IPC.
@@ -232,8 +250,8 @@ order of preference:
 (recommended).** It sits between the SDK and the real AndAppHelper and writes an
 annotated hex dump of both directions:
 1. Start the real AndApp client so its helper starts and writes
-   `%LOCALAPPDATA%\AndApp\AndAppHelper.cfg`.
-2. `python ipc_capture.py --cfg "%LOCALAPPDATA%\AndApp\AndAppHelper.cfg" --out handshake.log`
+   `%APPDATA%\AndApp\AndAppHelper.cfg`.
+2. `python ipc_capture.py --cfg "%APPDATA%\AndApp\AndAppHelper.cfg" --out handshake.log`
    — it reads the real ports, starts proxies on `port+1000`, and rewrites the cfg
    so the SDK connects to it and it forwards to the real helper.
 3. Launch `FF_EXVIUS.exe`. Launching directly still captures the handshake (it
