@@ -12,3 +12,7 @@ andapp_loader.log
 *.exe
 *.bak
 *.lnk
+
+# python
+__pycache__/
+*.pyc
