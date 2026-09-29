@@ -93,24 +93,56 @@ std::wstring appdata() {
 }
 
 void write_helper_cfg() {
-    std::wstring dir = appdata() + L"\\AndApp";
-    CreateDirectoryW(dir.c_str(), nullptr);
+    std::wstring base = appdata();
+    logf("cfg: APPDATA resolved to '%ls'", base.c_str());
+    if (base.empty()) { logf("cfg: APPDATA empty - cannot locate AndApp dir"); return; }
+    std::wstring dir = base + L"\\AndApp";
+    if (!CreateDirectoryW(dir.c_str(), nullptr) &&
+        GetLastError() != ERROR_ALREADY_EXISTS)
+        logf("cfg: CreateDirectory '%ls' err=%lu", dir.c_str(), GetLastError());
     std::wstring path = dir + L"\\AndAppHelper.cfg";
-    FILE* f = _wfopen(path.c_str(), L"wb");
-    if (!f) { logf("cfg: cannot write %ls", path.c_str()); return; }
+
     // Real format is a single-line JSON object. The genuine helper also lists a
-    // "standard.command.pipe.name" (\\.\pipe\AndAppNextHelper-<hash>); we omit it
-    // so the SDK falls back to the TCP command channel we implement. ipv6 = 0
-    // means "not listening", matching the real cfg.
-    fprintf(f,
+    // "standard.command.pipe.name"; we omit it so the SDK uses our TCP channel.
+    char body[256];
+    int n = _snprintf(body, sizeof(body),
         "{\"standard.tcp.command.ipv4.port\":%d,"
         "\"standard.tcp.command.ipv6.port\":0,"
         "\"standard.tcp.notification.ipv4.port\":%d,"
         "\"standard.tcp.notification.ipv6.port\":0}",
         config().command_port, config().notification_port);
-    fclose(f);
-    logf("cfg: wrote %ls (JSON, cmd=%d ntf=%d, TCP only)", path.c_str(),
+
+    // Clear read-only in case a previous writer set it, then write via Win32 so
+    // we get a real error code on failure.
+    SetFileAttributesW(path.c_str(), FILE_ATTRIBUTE_NORMAL);
+    HANDLE h = CreateFileW(path.c_str(), GENERIC_WRITE, FILE_SHARE_READ, nullptr,
+                           CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (h == INVALID_HANDLE_VALUE) {
+        logf("cfg: CreateFile '%ls' FAILED err=%lu", path.c_str(), GetLastError());
+        return;
+    }
+    DWORD wrote = 0;
+    BOOL okw = WriteFile(h, body, (DWORD)n, &wrote, nullptr);
+    CloseHandle(h);
+    if (!okw || wrote != (DWORD)n) {
+        logf("cfg: WriteFile '%ls' FAILED err=%lu (wrote %lu/%d)",
+             path.c_str(), GetLastError(), wrote, n);
+        return;
+    }
+    logf("cfg: wrote %ls (%d bytes, cmd=%d ntf=%d)", path.c_str(), n,
          config().command_port, config().notification_port);
+
+    // Read back to confirm what is actually on disk now.
+    HANDLE r = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr,
+                           OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (r != INVALID_HANDLE_VALUE) {
+        char rb[256]; DWORD got = 0;
+        if (ReadFile(r, rb, sizeof(rb) - 1, &got, nullptr)) {
+            rb[got] = 0;
+            logf("cfg: readback (%lu bytes): %s", got, rb);
+        }
+        CloseHandle(r);
+    }
 }
 
 // ---- payment-safe response builder ------------------------------------------
@@ -400,6 +432,7 @@ void accept_loop(int port, bool is_command) {
 void start_helper_server() {
     WSADATA w;
     WSAStartup(MAKEWORD(2, 2), &w);
+    logf("helper: write_cfg=%d", (int)config().write_cfg);
     if (config().write_cfg) write_helper_cfg();
     std::thread(accept_loop, config().command_port, true).detach();
     std::thread(accept_loop, config().notification_port, false).detach();

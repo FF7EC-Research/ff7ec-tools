@@ -72,9 +72,10 @@ static DWORD WINAPI init_thread(LPVOID) {
         // Chromium switches on its command line. It must NOT run the helper
         // server (would fight the main process for the loopback ports) or write
         // the cfg / touch the game mutex.
-        logf("CEF child process - skipping helper server / mutex / cfg");
+        logf("CEF child process (--type= present) - skipping helper/mutex/cfg");
         return 0;
     }
+    logf("main process (no --type=) - starting helper");
 
     if (config().mutex_fix)   install_mutex_hooks();
     install_process_hooks();    // propagate CEF switches to child processes
