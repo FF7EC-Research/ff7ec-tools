@@ -191,7 +191,19 @@ CEF is instead relaxed with Chromium command-line switches
   the switches; a `CreateProcessW` hook re-appends them to any `--type=` child as
   a safeguard (dedup-guarded).
 * Governed by the ini `[cef]` section; `[dns]` feeds both the winsock redirect
-  and the Chromium host-resolver rules. The game also has server-side reverify flags (`ForcePurchaseReverify`,
+  and the Chromium host-resolver rules.
+
+### Known FFBE JP (AndApp) endpoints
+
+The client's server hostnames, to point at a preservation server via `[dns]`:
+
+| Host | Role |
+|---|---|
+| `v53-ios.game.exvius.com` | game API / session |
+| `v53.notice.exvius.com`   | notices / news |
+| `cdn.resource.exvius.com` | asset CDN (masters, images, …) |
+
+(`v53` is the API version prefix; it advances with major game versions.) The game also has server-side reverify flags (`ForcePurchaseReverify`,
 `BUY_COIN_REVERIFY_*`), so spoofing a local success would fail reverification
 anyway — declining is both the honest and the robust choice.
 
