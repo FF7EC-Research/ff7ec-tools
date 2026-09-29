@@ -30,12 +30,14 @@
 #include "loader.h"
 #include <ws2tcpip.h>
 #include <wincrypt.h>
+#include <shlobj.h>
 #include <thread>
 #include <string>
 #include <vector>
 #include <cstdlib>
 #pragma comment(lib, "ws2_32.lib")
 #pragma comment(lib, "advapi32.lib")
+#pragma comment(lib, "shell32.lib")
 
 namespace loader {
 namespace {
@@ -79,9 +81,13 @@ std::string jget(const std::string& json, const std::string& key) {
 
 // ---- config file the SDK reads to find our ports ----------------------------
 std::wstring appdata() {
-    // Roaming %APPDATA% - the game reads AndAppHelper.cfg via SHGetFolderPathW
-    // with CSIDL_APPDATA (0x1a), and the real helper writes it there too.
+    // Resolve exactly the way the game does: SHGetFolderPathW(CSIDL_APPDATA)
+    // (roaming). This matches the game's own path resolution even under folder
+    // redirection, unlike the %APPDATA% env var. Falls back to the env var.
     wchar_t buf[MAX_PATH]{};
+    if (SUCCEEDED(SHGetFolderPathW(nullptr, CSIDL_APPDATA, nullptr,
+                                   SHGFP_TYPE_CURRENT, buf)) && buf[0])
+        return std::wstring(buf);
     DWORD n = GetEnvironmentVariableW(L"APPDATA", buf, MAX_PATH);
     return (n > 0 && n < MAX_PATH) ? std::wstring(buf) : std::wstring();
 }

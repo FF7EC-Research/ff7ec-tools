@@ -11,7 +11,7 @@ if /I "%1"=="mingw" goto mingw
 echo === Building with MSVC (x86) ===
 cl /nologo /LD /O2 /EHsc /DWIN32 /D_WINDOWS ^
    winmm.cpp util.cpp hooks.cpp helper_server.cpp cef_hook.cpp ^
-   /Fe:winmm.dll /link /DEF:winmm.def ws2_32.lib user32.lib advapi32.lib
+   /Fe:winmm.dll /link /DEF:winmm.def ws2_32.lib user32.lib advapi32.lib shell32.lib
 if errorlevel 1 exit /b 1
 echo Built winmm.dll
 goto done
@@ -20,7 +20,7 @@ goto done
 echo === Building with MinGW (i686) ===
 i686-w64-mingw32-g++ -shared -O2 -static -std=c++17 -DWIN32 ^
    winmm.cpp util.cpp hooks.cpp helper_server.cpp cef_hook.cpp winmm.def ^
-   -o winmm.dll -lws2_32 -luser32 -ladvapi32 -Wl,--enable-stdcall-fixup
+   -o winmm.dll -lws2_32 -luser32 -ladvapi32 -lshell32 -Wl,--enable-stdcall-fixup
 if errorlevel 1 exit /b 1
 echo Built winmm.dll
 goto done

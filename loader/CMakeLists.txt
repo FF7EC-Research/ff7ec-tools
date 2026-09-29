@@ -19,7 +19,7 @@ add_library(winmm SHARED
     winmm.def
 )
 set_target_properties(winmm PROPERTIES PREFIX "" OUTPUT_NAME "winmm")
-target_link_libraries(winmm ws2_32 user32 advapi32)
+target_link_libraries(winmm ws2_32 user32 advapi32 shell32)
 
 if(NOT CMAKE_SIZEOF_VOID_P EQUAL 4)
     message(WARNING
