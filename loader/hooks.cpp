@@ -188,6 +188,43 @@ void install_mutex_hooks() {
     logf("mutex hooks installed: CreateMutexW=%d CreateMutexExW=%d", (int)a, (int)b);
 }
 
+// ================= AndAppHelper.cfg read redirect ============================
+// The game opens %APPDATA%\AndApp\AndAppHelper.cfg (path baked in via
+// SHGetFolderPathW). We intercept CreateFileW and redirect that open to our
+// game-folder cfg, so the real AndApp's %APPDATA% copy is never read or touched.
+typedef HANDLE (WINAPI* CreateFileW_t)(LPCWSTR, DWORD, DWORD, LPSECURITY_ATTRIBUTES,
+                                       DWORD, DWORD, HANDLE);
+static CreateFileW_t real_CreateFileW = nullptr;
+static std::wstring g_cfg_redirect;
+
+static bool icontains(const std::wstring& hay, const wchar_t* need) {
+    std::wstring h = hay, n = need;
+    std::transform(h.begin(), h.end(), h.begin(), ::towlower);
+    std::transform(n.begin(), n.end(), n.begin(), ::towlower);
+    return h.find(n) != std::wstring::npos;
+}
+
+static HANDLE WINAPI hook_CreateFileW(LPCWSTR name, DWORD access, DWORD share,
+                                      LPSECURITY_ATTRIBUTES sa, DWORD disp,
+                                      DWORD flags, HANDLE tmpl) {
+    if (name && !g_cfg_redirect.empty() && icontains(name, L"AndAppHelper.cfg") &&
+        _wcsicmp(name, g_cfg_redirect.c_str()) != 0) {
+        logf("cfg: redirecting open of '%ls' -> '%ls'", name, g_cfg_redirect.c_str());
+        return real_CreateFileW(g_cfg_redirect.c_str(), access, share, sa, disp,
+                                flags, tmpl);
+    }
+    return real_CreateFileW(name, access, share, sa, disp, flags, tmpl);
+}
+
+void install_cfg_redirect() {
+    if (!config().cfg_in_gamedir) { logf("cfg: redirect disabled"); return; }
+    g_cfg_redirect = cfg_target_path();
+    int n = iat_hook_all_modules("kernel32.dll", "CreateFileW",
+                                 (void*)hook_CreateFileW, (void**)&real_CreateFileW);
+    logf("cfg: CreateFileW redirect installed in %d module(s) -> '%ls'",
+         n, g_cfg_redirect.c_str());
+}
+
 // ================= SSL / certificate + pinning bypass ========================
 // FF_EXVIUS does HTTPS via libcurl -> OpenSSL. To accept any certificate from a
 // recreated preservation server (self-signed, hostname mismatch, and to defeat

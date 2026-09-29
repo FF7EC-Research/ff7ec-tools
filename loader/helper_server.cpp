@@ -92,15 +92,31 @@ std::wstring appdata() {
     return (n > 0 && n < MAX_PATH) ? std::wstring(buf) : std::wstring();
 }
 
+}  // namespace
+
+// Where the cfg lives: game dir (default, avoids touching the real AndApp) or
+// the real %APPDATA%\AndApp location. Used by both the writer and the CreateFileW
+// redirect so they always agree.
+std::wstring cfg_target_path() {
+    if (config().cfg_in_gamedir)
+        return dll_directory() + L"\\AndAppHelper.cfg";
+    return appdata() + L"\\AndApp\\AndAppHelper.cfg";
+}
+
+namespace {
+
 void write_helper_cfg() {
-    std::wstring base = appdata();
-    logf("cfg: APPDATA resolved to '%ls'", base.c_str());
-    if (base.empty()) { logf("cfg: APPDATA empty - cannot locate AndApp dir"); return; }
-    std::wstring dir = base + L"\\AndApp";
-    if (!CreateDirectoryW(dir.c_str(), nullptr) &&
-        GetLastError() != ERROR_ALREADY_EXISTS)
-        logf("cfg: CreateDirectory '%ls' err=%lu", dir.c_str(), GetLastError());
-    std::wstring path = dir + L"\\AndAppHelper.cfg";
+    std::wstring path = cfg_target_path();
+    logf("cfg: target '%ls'", path.c_str());
+    // Ensure the parent directory exists (game dir always does; %APPDATA%\AndApp
+    // may not).
+    size_t slash = path.find_last_of(L'\\');
+    if (slash != std::wstring::npos) {
+        std::wstring dir = path.substr(0, slash);
+        if (!CreateDirectoryW(dir.c_str(), nullptr) &&
+            GetLastError() != ERROR_ALREADY_EXISTS)
+            logf("cfg: CreateDirectory '%ls' err=%lu", dir.c_str(), GetLastError());
+    }
 
     // Real format is a single-line JSON object. The genuine helper also lists a
     // "standard.command.pipe.name"; we omit it so the SDK uses our TCP channel.

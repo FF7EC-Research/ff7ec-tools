@@ -6,9 +6,12 @@ desktop client — no extra programs to launch. It:
 
 1. **Proxies `winmm.dll`** transparently to the real system winmm (audio/timers
    keep working), and uses `DllMain` as an injection point.
-2. **Hosts the AndApp helper** on loopback TCP and writes
-   `%APPDATA%\AndApp\AndAppHelper.cfg` so the SDK finds it — with
-   **payments disabled** (never fakes a purchase).
+2. **Hosts the AndApp helper** on loopback TCP with the real RSA/AES handshake
+   and JSON command protocol — **payments disabled** (never fakes a purchase).
+   By default it keeps `AndAppHelper.cfg` **in the game folder** and hooks
+   `CreateFileW` to redirect the game's read there, so the real AndApp's
+   `%APPDATA%\AndApp\AndAppHelper.cfg` is never touched (`[helper] cfg_in_gamedir`;
+   set false to use the real `%APPDATA%` location).
 3. **Redirects game-server hostnames** to your preservation server, via a
    `[dns]` table in `andapp_loader.ini` (hooks `getaddrinfo`/`GetAddrInfoW`).
 4. **Accepts any TLS certificate and defeats certificate pinning** so a

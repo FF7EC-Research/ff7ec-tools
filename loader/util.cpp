@@ -107,6 +107,7 @@ bool load_config(const std::wstring& ini_path) {
             else if (key == "command_port")  g_cfg.command_port = atoi(val.c_str());
             else if (key == "notification_port") g_cfg.notification_port = atoi(val.c_str());
             else if (key == "write_cfg")     g_cfg.write_cfg = truthy(val);
+            else if (key == "cfg_in_gamedir") g_cfg.cfg_in_gamedir = truthy(val);
             else if (key == "player_id")     g_cfg.player_id = val;
             else if (key == "id_token")      g_cfg.id_token = val;
         } else if (section == "ssl") {

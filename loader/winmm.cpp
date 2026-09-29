@@ -79,6 +79,7 @@ static DWORD WINAPI init_thread(LPVOID) {
 
     if (config().mutex_fix)   install_mutex_hooks();
     install_process_hooks();    // propagate CEF switches to child processes
+    install_cfg_redirect();     // redirect the game's cfg read to the game folder
     if (config().helper_enabled) start_helper_server();
 
     logf("initialization complete");

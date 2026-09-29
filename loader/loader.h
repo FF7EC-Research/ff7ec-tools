@@ -22,7 +22,10 @@ struct Config {
     bool   helper_enabled       = true;
     int    command_port         = 51100;         // standard.tcp.command.ipv4.port
     int    notification_port    = 51101;         // standard.tcp.notification.ipv4.port
-    bool   write_cfg            = true;          // write %APPDATA%\AndApp\AndAppHelper.cfg
+    bool   write_cfg            = true;          // write the AndAppHelper.cfg
+    bool   cfg_in_gamedir       = true;          // keep cfg in the game folder and
+                                                 // redirect the game's read there,
+                                                 // so %APPDATA%\AndApp is untouched
     std::string player_id       = "1000000000000000";
     std::string id_token;                        // optional pre-baked token; else synthesized
 
@@ -73,6 +76,11 @@ bool force_return(void* func, uint32_t ret_val);
 void install_dns_hooks();     // getaddrinfo / GetAddrInfoW / gethostbyname
 void install_mutex_hooks();   // CreateMutexW / CreateMutexExW
 void install_ssl_bypass();    // openssl X509_verify_cert / SSL_get_verify_result / libcurl
+void install_cfg_redirect();  // CreateFileW: redirect AndAppHelper.cfg reads to game dir
+
+// Absolute path where the AndAppHelper.cfg lives (game dir if cfg_in_gamedir,
+// else %APPDATA%\AndApp\AndAppHelper.cfg). Shared by the writer and the redirect.
+std::wstring cfg_target_path();
 
 // Command-line injection: --andapp-payload-id (standalone launch) + CEF switches.
 // Must run BEFORE cef_initialize / SDK init, so it is installed synchronously in
