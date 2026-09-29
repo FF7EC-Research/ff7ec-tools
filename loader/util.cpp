@@ -87,7 +87,17 @@ bool load_config(const std::wstring& ini_path) {
         size_t eq = t.find('=');
         if (eq == std::string::npos) continue;
         std::string key = lower(trim(t.substr(0, eq)));
-        std::string val = trim(t.substr(eq + 1));
+        std::string val = t.substr(eq + 1);
+        // Strip an inline comment: a ';' or '#' preceded by whitespace. (Our
+        // values never contain those chars unescaped, so this is safe.)
+        for (size_t i = 0; i < val.size(); ++i) {
+            if ((val[i] == ';' || val[i] == '#') &&
+                (i == 0 || val[i - 1] == ' ' || val[i - 1] == '\t')) {
+                val = val.substr(0, i);
+                break;
+            }
+        }
+        val = trim(val);
 
         if (section == "loader") {
             if (key == "log")        g_cfg.log_enabled = truthy(val);
