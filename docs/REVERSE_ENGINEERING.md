@@ -188,3 +188,47 @@ one real SDK↔helper session:
 
 Until then the helper runs in pass-through (newline-framed plaintext JSON) mode
 and logs raw byte counts so its framing can be diffed against the capture.
+
+---
+
+## 6. `manifest.json` + `signature` file — AndApp integrity (not the game's)
+
+`manifest.json` (v11 sample: `versionCode 124`, `versionName 11.0.0`,
+`clientId 5701868182306816`, `entryPointBaseName FF_EXVIUS.exe`) is AndApp's file
+inventory. Its `signature[]` array holds one entry per shipped file
+(`bin/*.exe`, the root DLLs, and the exe): `{path, signature}`. The sibling
+`signature` file is a single value covering `manifest.json` itself.
+
+**Format.** Every signature (per-file and the top-level one) decodes to exactly
+**64 bytes** — an **asymmetric signature** (ECDSA-P256 `r‖s`, or Ed25519), made
+with DeNA's private key. Ruled out by testing against `zlib1.dll`: it is **not**
+SHA-512/384/SHA3-512/BLAKE2b, and **not** HMAC-SHA512 over the file, path+file,
+or the file's hash, across the obvious embedded keys (clientId, versionName,
+"andapp", …). Being asymmetric, these **cannot be regenerated** without DeNA's
+private key.
+
+**Who verifies it.** Only the AndApp launcher / BootHelper (install + launch
+integrity). The **game does not**:
+* `FF_EXVIUS.exe` imports from `libcrypto-1_1.dll` are symmetric-only
+  (AES-128 CBC/ECB, MD5) — **no** `ECDSA_verify` / `EVP_DigestVerify` / `EC_KEY`
+  / `d2i_PUBKEY`, and no `CryptVerifySignature` from advapi32.
+* The only game reference to `manifest.json` is in `SdkUtils.cpp`, which parses
+  `versionCode` / `versionName` / `platform` / `architecture` /
+  `entryPointBaseName` to populate the SDK's `initialize` payload — it never
+  reads the `signature` array.
+
+**Consequence for preservation.** Launched directly (our winmm loader replacing
+AndApp), **nothing verifies these signatures**, so patched files — a modified
+exe, patched OpenSSL DLLs, our `winmm.dll` — run fine. **No in-game
+"ignore-signature" hook is needed.** (An integrity bypass would only matter if
+you launched *through* AndApp, which this project avoids.)
+
+**Tooling.** [`tools/gen_manifest.py`](../tools/gen_manifest.py) rebuilds a
+manifest for a game dir (correct file list + version fields). Since valid AndApp
+signatures can't be produced, it writes SHA-512 integrity hashes by default (for
+our own verification), can `--preserve` original signatures for unchanged files,
+or emit `--sig empty`.
+
+> Note: the decrypted `VersionAndApp.xml` in this repo is from **v10** (10.0.0);
+> the `manifest.json` sample is **v11** (11.0.0). `clientId 5701868182306816`
+> here is the AndApp *application* id, distinct from the SDK build id `ab6198d`.
