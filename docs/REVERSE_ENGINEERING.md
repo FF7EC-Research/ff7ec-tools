@@ -195,16 +195,29 @@ CEF is instead relaxed with Chromium command-line switches
 
 ### Known FFBE JP (AndApp) endpoints
 
-The client's server hostnames, to point at a preservation server via `[dns]`:
+The client's server hostnames (found in the v11 exe), to point at a preservation
+server via `[dns]`:
 
-| Host | Role |
-|---|---|
-| `v53-ios.game.exvius.com` | game API / session |
-| `v53.notice.exvius.com`   | notices / news (versioned) |
-| `notice.exvius.com`       | notices / news (unversioned) |
-| `cdn.resource.exvius.com` | asset CDN (masters, images, …) |
+| Host | Role | Path base |
+|---|---|---|
+| `v53-ios.game.exvius.com`     | game API / session | `/lapis/app` |
+| `v53-ios.purchase.exvius.com` | purchase / receipts | `/lapis/app` |
+| `purchase.exvius.com`         | purchase (bare host) | |
+| `cdn.resource.exvius.com`     | asset CDN (masters, images, …) | `/lapis/resource` |
+| `v53.notice.exvius.com`       | notices / news (versioned) | `/content/…` |
+| `v24.notice.exvius.com`       | notices / news (older, still referenced) | `/content/…` |
+| `notice.exvius.com`           | notices / news (unversioned) | |
 
-(`v53` is the API version prefix; it advances with major game versions.) The game also has server-side reverify flags (`ForcePurchaseReverify`,
+Notes:
+* `v53` is the API version prefix; it advances with major game versions. The
+  Windows/AndApp build uses the **`-ios`** platform suffix on the game/purchase
+  hosts (`v53-ios.…`).
+* There is **no separate auth/SSO hostname** in the client — the account token is
+  obtained through the AndApp helper IPC (`get_id_token`), which the loader
+  replaces, so nothing extra needs redirecting for login.
+* Browser-opened links (not server traffic, no redirect needed):
+  `www.jp.square-enix.com/FFBE/`, `play.google.com/store/…ffbejpn`,
+  `sqex.to/qmr`, `sqex-bridge.jp`. The game also has server-side reverify flags (`ForcePurchaseReverify`,
 `BUY_COIN_REVERIFY_*`), so spoofing a local success would fail reverification
 anyway — declining is both the honest and the robust choice.
 
