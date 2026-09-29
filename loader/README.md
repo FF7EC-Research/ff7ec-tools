@@ -22,6 +22,13 @@ desktop client — no extra programs to launch. It:
    modules**, with a short retry to catch lazily-loaded OpenSSL/curl. Only this
    local client process is affected.
 5. **Neutralizes the single-instance mutex** so the game launches standalone.
+6. **Relaxes the embedded Chromium (CEF)** used for login/portal/store webviews.
+   CEF has its own network stack + TLS (BoringSSL), separate from libcurl/OpenSSL,
+   so it needs Chromium switches: the loader inline-hooks `GetCommandLineW` (before
+   `cef_initialize`) to append `--ignore-certificate-errors` (+ related) and
+   `--host-resolver-rules="MAP host ip,…"` built from the `[dns]` table, and also
+   appends them to CEF child processes via `CreateProcessW`. Configured under
+   `[cef]`.
 
 Everything is gated by `andapp_loader.ini`; delete or disable a section to turn
 a feature off.
@@ -62,6 +69,7 @@ SSL patches, and raw command bytes.
 | `winmm.cpp`, `winmm_exports.inc`, `winmm.def` | winmm proxy + DllMain |
 | `util.cpp` | logging, `.ini` parsing, config |
 | `hooks.cpp` | IAT hook, prologue patch, DNS / mutex / SSL hooks |
+| `cef_hook.cpp` | CEF command-line injection (cert-ignore + host-resolver-rules) |
 | `helper_server.cpp` | AndAppHelper TCP replacement (payments stubbed) |
 | `andapp_loader.ini` | configuration |
 

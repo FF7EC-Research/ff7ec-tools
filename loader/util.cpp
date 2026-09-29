@@ -98,6 +98,12 @@ bool load_config(const std::wstring& ini_path) {
             if (key == "bypass") g_cfg.ssl_bypass = truthy(val);
         } else if (section == "mutex") {
             if (key == "fix") g_cfg.mutex_fix = truthy(val);
+        } else if (section == "cef") {
+            if (key == "enabled")                        g_cfg.cef_enabled = truthy(val);
+            else if (key == "ignore_certificate_errors") g_cfg.cef_ignore_cert = truthy(val);
+            else if (key == "disable_web_security")      g_cfg.cef_disable_websec = truthy(val);
+            else if (key == "host_resolver_rules")       g_cfg.cef_host_rules = truthy(val);
+            else if (key == "extra_switches")            g_cfg.cef_extra_switches = val;
         } else if (section == "dns") {
             // key = hostname, val = ipv4  (e.g. api.example.jp = 127.0.0.1)
             g_cfg.dns[lower(key)] = val;

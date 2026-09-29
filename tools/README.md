@@ -32,18 +32,11 @@ game's DLLs. Both do the same two no-ops.
 > These only affect the local client you own; they are not for intercepting
 > anyone else's traffic.
 
-## `gen_manifest.py`
-Rebuild an AndApp-style `manifest.json` for a game directory (file list + version
-fields). The shipped `signature[]` values are 64-byte **asymmetric** signatures
-(ECDSA-P256/Ed25519, DeNA private key) and cannot be validly regenerated — but
-they are **only checked by AndApp, never by the game** (see
-[`../docs/REVERSE_ENGINEERING.md`](../docs/REVERSE_ENGINEERING.md) §6), so a
-direct launch doesn't need valid ones.
-
-```
-python gen_manifest.py <game_dir> -o manifest.json --template old_manifest.json --sig preserve
-python gen_manifest.py <game_dir> --sig sha512     # our own integrity hashes
-```
-`--sig`: `sha512` (default, real integrity hash), `preserve` (reuse originals
-for unchanged files), or `empty`.
+## manifest.json / `signature` (no tool — by design)
+`manifest.json`'s `signature[]` and the sibling `signature` file are 64-byte
+**asymmetric** signatures (ECDSA-P256/Ed25519, DeNA private key) and **cannot be
+regenerated** without that key. They are **only checked by AndApp, never by the
+game**, so a direct launch does not need valid ones and no generator is shipped.
+See [`../docs/REVERSE_ENGINEERING.md`](../docs/REVERSE_ENGINEERING.md) §6 for the
+full analysis.
 

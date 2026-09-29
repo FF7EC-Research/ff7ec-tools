@@ -15,6 +15,7 @@ add_library(winmm SHARED
     util.cpp
     hooks.cpp
     helper_server.cpp
+    cef_hook.cpp
     winmm.def
 )
 set_target_properties(winmm PROPERTIES PREFIX "" OUTPUT_NAME "winmm")

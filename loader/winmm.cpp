@@ -61,20 +61,12 @@ static void load_real_winmm() {
 #undef WINMM_FN
 #endif
 
-// ---- one-time initialization on a worker thread ------------------------------
+// ---- heavier initialization on a worker thread (off the loader lock) ---------
 static DWORD WINAPI init_thread(LPVOID) {
-    std::wstring ini = dll_directory() + L"\\andapp_loader.ini";
-    load_config(ini);
-    log_init(config().log_path.empty()
-                 ? dll_directory() + L"\\andapp_loader.log"
-                 : config().log_path,
-             config().log_enabled);
-    logf("=== AndApp preservation loader (winmm proxy) ===");
-    logf("ini: %ls", ini.c_str());
-
     if (config().mutex_fix)   install_mutex_hooks();
     if (config().ssl_bypass)  install_ssl_bypass();
-    install_dns_hooks();  // no-op if the ini defines no redirects
+    install_dns_hooks();        // no-op if the ini defines no redirects
+    install_process_hooks();    // propagate CEF switches to child processes
     if (config().helper_enabled) start_helper_server();
 
     logf("initialization complete");
@@ -85,7 +77,21 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID) {
     if (reason == DLL_PROCESS_ATTACH) {
         DisableThreadLibraryCalls(hModule);
         load_real_winmm();
-        // Do heavy work off the loader lock.
+
+        // Config + CEF command-line injection must happen BEFORE the game calls
+        // cef_initialize, i.e. synchronously here (the exe entrypoint runs after
+        // all DllMains). These are lightweight: a file read and a prologue patch.
+        std::wstring ini = dll_directory() + L"\\andapp_loader.ini";
+        load_config(ini);
+        log_init(config().log_path.empty()
+                     ? dll_directory() + L"\\andapp_loader.log"
+                     : config().log_path,
+                 config().log_enabled);
+        logf("=== AndApp preservation loader (winmm proxy) ===");
+        logf("ini: %ls", ini.c_str());
+        install_cef_cmdline_hook();
+
+        // Everything else can run off the loader lock.
         CloseHandle(CreateThread(nullptr, 0, init_thread, nullptr, 0, nullptr));
     }
     return TRUE;

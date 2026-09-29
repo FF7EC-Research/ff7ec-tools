@@ -32,6 +32,13 @@ struct Config {
     // Mutex neutralization (launch without the official AndApp installed)
     bool   mutex_fix            = true;
 
+    // CEF (embedded Chromium) command-line injection for webview screens
+    bool   cef_enabled          = true;   // inject switches into libcef
+    bool   cef_ignore_cert      = true;   // --ignore-certificate-errors etc.
+    bool   cef_disable_websec   = false;  // --disable-web-security
+    bool   cef_host_rules       = true;   // build --host-resolver-rules from [dns]
+    std::string cef_extra_switches;       // freeform, appended verbatim
+
     // DNS redirects: hostname (lower-case) -> IPv4 string
     std::map<std::string, std::string> dns;
 };
@@ -45,12 +52,22 @@ std::wstring dll_directory();
 bool iat_hook(const char* import_dll, const char* func, void* replacement,
               void** original);
 
+// IAT hook across every loaded module (returns how many modules were patched).
+int iat_hook_all_modules(const char* import_dll, const char* func,
+                         void* replacement, void** original);
+
 // Force a function's prologue to `mov eax, ret_val; ret` (cdecl no-op).
 bool force_return(void* func, uint32_t ret_val);
 
 void install_dns_hooks();     // getaddrinfo / GetAddrInfoW / gethostbyname
 void install_mutex_hooks();   // CreateMutexW / CreateMutexExW
 void install_ssl_bypass();    // openssl X509_verify_cert / SSL_get_verify_result / libcurl
+
+// CEF (embedded Chromium) support.
+// Must run BEFORE cef_initialize, so it is installed synchronously in DllMain.
+void install_cef_cmdline_hook();   // inline-hook GetCommandLineW to append switches
+void install_process_hooks();      // CreateProcessW: propagate switches to CEF children
+std::string cef_switch_string();   // the switches we inject (for logging/reuse)
 
 // ---- AndApp helper TCP server ------------------------------------------------
 void start_helper_server();   // spawns listener threads; writes AndAppHelper.cfg

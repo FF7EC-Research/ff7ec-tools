@@ -167,7 +167,31 @@ accepted and any certificate pinning is defeated:
 libcurl is imported by `libcocos2d.dll`, not by the exe, so the `curl_easy_setopt`
 hook is installed across every loaded module (`hooks.cpp:iat_hook_all_modules`),
 with a ~10 s retry for lazily-loaded OpenSSL/curl. See `loader/hooks.cpp`
-`install_ssl_bypass()`. The game also has server-side reverify flags (`ForcePurchaseReverify`,
+`install_ssl_bypass()`.
+
+### CEF (embedded Chromium) — separate network stack
+
+The game bundles CEF (`libcef.dll`, `chrome_elf.dll`, `cef*.pak`, v8 snapshots,
+`icudtl.dat`, `widevinecdmadapter.dll`, `locales/`), so login / portal / store
+screens are almost certainly Chromium webviews. **CEF has its own network stack
+and TLS (BoringSSL inside `libcef.dll`)** — the libcurl/OpenSSL bypass does not
+touch it, and CEF runs networking in child processes that may not load our DLL.
+
+CEF is instead relaxed with Chromium command-line switches
+(`loader/cef_hook.cpp`), which must be present before `cef_initialize`:
+
+* The loader inline-patches `GetCommandLineW` (synchronously in `DllMain`, before
+  the exe entrypoint) to append:
+  `--ignore-certificate-errors`, `--ignore-urlfetcher-cert-requests`,
+  `--allow-running-insecure-content`, `--test-type`, optionally
+  `--disable-web-security`, and
+  `--host-resolver-rules="MAP <host> <ip>,…,EXCLUDE localhost"` built from the
+  `[dns]` table. Because CEF reuses `FF_EXVIUS.exe` as its subprocess (no
+  separate CEF helper exe ships), every CEF process loads our winmm.dll and gets
+  the switches; a `CreateProcessW` hook re-appends them to any `--type=` child as
+  a safeguard (dedup-guarded).
+* Governed by the ini `[cef]` section; `[dns]` feeds both the winsock redirect
+  and the Chromium host-resolver rules. The game also has server-side reverify flags (`ForcePurchaseReverify`,
 `BUY_COIN_REVERIFY_*`), so spoofing a local success would fail reverification
 anyway — declining is both the honest and the robust choice.
 
@@ -223,12 +247,14 @@ exe, patched OpenSSL DLLs, our `winmm.dll` — run fine. **No in-game
 "ignore-signature" hook is needed.** (An integrity bypass would only matter if
 you launched *through* AndApp, which this project avoids.)
 
-**Tooling.** [`tools/gen_manifest.py`](../tools/gen_manifest.py) rebuilds a
-manifest for a game dir (correct file list + version fields). Since valid AndApp
-signatures can't be produced, it writes SHA-512 integrity hashes by default (for
-our own verification), can `--preserve` original signatures for unchanged files,
-or emit `--sig empty`.
+**Tooling.** None is shipped: because the signatures are asymmetric and can't be
+regenerated without DeNA's private key, and because the game never verifies them,
+there is nothing to generate. If you ever need a manifest for your own tooling,
+copy the shipped one and edit the version fields — the `signature` array is inert
+for a direct (non-AndApp) launch.
 
-> Note: the decrypted `VersionAndApp.xml` in this repo is from **v10** (10.0.0);
-> the `manifest.json` sample is **v11** (11.0.0). `clientId 5701868182306816`
-> here is the AndApp *application* id, distinct from the SDK build id `ab6198d`.
+> Versions: the CCZ key is **unchanged across v10 and v11** — the same four key
+> parts decrypt both `VersionAndApp.xml` files (v10 → 10.0.0, v11 → 11.0.0), and
+> the v11 `FF_EXVIUS.exe` sets them at RVA `0x00759022`. The `manifest.json`
+> sample is v11 (`versionCode 124`). `clientId 5701868182306816` there is the
+> AndApp *application* id, distinct from the SDK build id `ab6198d`.

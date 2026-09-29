@@ -53,8 +53,8 @@ bool iat_hook(const char* import_dll, const char* func, void* replacement,
 
 // Hook the import in EVERY loaded module. Needed for libcurl, which is called
 // by libcocos2d.dll (and the SDK), not by the game exe directly.
-static int iat_hook_all_modules(const char* import_dll, const char* func,
-                                void* replacement, void** original) {
+int iat_hook_all_modules(const char* import_dll, const char* func,
+                         void* replacement, void** original) {
     int count = 0;
     HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPMODULE, 0);
     if (snap == INVALID_HANDLE_VALUE) return 0;
