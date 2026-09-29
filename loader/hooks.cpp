@@ -217,13 +217,19 @@ static const wchar_t* kSslModules[] = {
 };
 
 // Force `fn` (found in whichever candidate module exports it) to return ret_val.
+// Patch each address at most once so the late-load watcher doesn't spam the log.
 static void patch_func_any(const char* fn, uint32_t ret_val) {
+    static std::vector<void*> done;
     for (auto mod : kSslModules) {
         HMODULE h = GetModuleHandleW(mod);
         if (!h) continue;
         void* p = (void*)GetProcAddress(h, fn);
-        if (p && force_return(p, ret_val))
+        if (!p) continue;
+        if (std::find(done.begin(), done.end(), p) != done.end()) continue;
+        if (force_return(p, ret_val)) {
+            done.push_back(p);
             logf("ssl: patched %ls!%s -> %u", mod, fn, ret_val);
+        }
     }
 }
 

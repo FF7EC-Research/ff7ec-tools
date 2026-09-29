@@ -63,9 +63,20 @@ static void load_real_winmm() {
 
 // ---- heavier initialization on a worker thread (off the loader lock) ---------
 static DWORD WINAPI init_thread(LPVOID) {
-    if (config().mutex_fix)   install_mutex_hooks();
+    // SSL bypass is wanted in every process (CEF's network child does TLS too).
     if (config().ssl_bypass)  install_ssl_bypass();
     install_dns_hooks();        // no-op if the ini defines no redirects
+
+    if (is_cef_child()) {
+        // A CEF renderer/gpu/utility/network subprocess: it already inherited the
+        // Chromium switches on its command line. It must NOT run the helper
+        // server (would fight the main process for the loopback ports) or write
+        // the cfg / touch the game mutex.
+        logf("CEF child process - skipping helper server / mutex / cfg");
+        return 0;
+    }
+
+    if (config().mutex_fix)   install_mutex_hooks();
     install_process_hooks();    // propagate CEF switches to child processes
     if (config().helper_enabled) start_helper_server();
 

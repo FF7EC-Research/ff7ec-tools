@@ -53,6 +53,11 @@ Config& config();
 bool load_config(const std::wstring& ini_path);
 std::wstring dll_directory();
 
+// True when this process is a CEF/Chromium child (command line has --type=),
+// e.g. renderer/gpu/utility/network. Such children load our winmm.dll too (CEF
+// reuses the game exe), but must NOT start the helper server or write the cfg.
+bool is_cef_child();
+
 // ---- hook installers ---------------------------------------------------------
 // IAT hook helper: replace every import of (module, func) in the main image.
 bool iat_hook(const char* import_dll, const char* func, void* replacement,

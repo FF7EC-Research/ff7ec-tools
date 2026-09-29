@@ -12,6 +12,11 @@ static std::wstring g_log_path;
 static bool g_log_enabled = true;
 static std::mutex g_log_mtx;
 
+bool is_cef_child() {
+    LPCWSTR cl = GetCommandLineW();
+    return cl && wcsstr(cl, L"--type=") != nullptr;
+}
+
 std::wstring dll_directory() {
     wchar_t buf[MAX_PATH]{};
     HMODULE h = nullptr;
