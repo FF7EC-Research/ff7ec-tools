@@ -11,3 +11,4 @@ andapp_loader.log
 # local binaries / captures (do not commit copyrighted game files)
 *.exe
 *.bak
+*.lnk
