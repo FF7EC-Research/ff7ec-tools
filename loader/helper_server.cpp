@@ -138,23 +138,31 @@ std::string handle_command(const std::string& req) {
     std::string action = top_command(req);
     logf("cmd <- action=%s  json=%s", action.c_str(), req.c_str());
 
-    // Response envelope mirrors the request: {"<command>":{ ...fields... }}.
-    // We include a top-level "error":null as well, so whichever level the SDK
-    // reads, it sees success. (Refine once we see the game's reaction.)
+    // The SDK reads result fields at the TOP LEVEL of the response object, and
+    // only if a required field is missing does it look for a top-level "error"
+    // key (any "error" key = failure). So a success reply is FLAT with the
+    // expected fields and NO "error" key. (Confirmed by disassembly of the
+    // initialize response parser at RVA 0x0105c3a0.)
     auto reply = [&](const std::string& fields) {
-        std::string inner = std::string("\"error\":null");
-        if (!fields.empty()) inner += "," + fields;
-        std::string r = "{\"error\":null,\"" + action + "\":{" + inner + "}}";
+        std::string r = "{" + fields + "}";
+        logf("cmd -> %s", r.c_str());
+        return r;
+    };
+    auto fail = [&](int code, const std::string& msg) {
+        std::string r = "{\"error\":{\"code\":" + std::to_string(code) +
+                        ",\"message\":" + jstr(msg) + "}}";
         logf("cmd -> %s", r.c_str());
         return r;
     };
 
     if (action == "initialize") {
+        // Required top-level keys: session, is_billing_supported,
+        // andapp_client_version (player_id included for good measure).
         return reply(
             "\"session\":" + jstr("preservation-session") +
             ",\"player_id\":" + jstr(config().player_id) +
             ",\"is_billing_supported\":false" +
-            ",\"andapp_client_version\":\"1.0.4\"");
+            ",\"andapp_client_version\":\"3.8.0\"");
     }
     if (action == "is_billing_supported") {
         return reply("\"is_billing_supported\":false");
@@ -175,14 +183,10 @@ std::string handle_command(const std::string& req) {
         action == "consume_purchase" || action == "get_request_purchase_info") {
         // PAYMENT STUB: always decline. We never emit paymentSucceed.
         logf("payment '%s' declined (preservation build)", action.c_str());
-        std::string r = "{\"error\":{\"code\":1,\"message\":\"Billing disabled "
-                        "(preservation build)\"},\"" + action + "\":{\"error\":"
-                        "{\"code\":1,\"message\":\"Billing disabled\"}}}";
-        logf("cmd -> %s", r.c_str());
-        return r;
+        return fail(1, "Billing disabled (preservation build)");
     }
     if (action == "send_analytics_event" || action == "open_app_page") {
-        return reply("");
+        return reply("");  // empty object, no error = success
     }
     // Unknown verb: acknowledge without error so the SDK keeps going.
     return reply("");
