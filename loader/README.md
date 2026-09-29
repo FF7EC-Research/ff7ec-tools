@@ -11,8 +11,16 @@ desktop client — no extra programs to launch. It:
    **payments disabled** (never fakes a purchase).
 3. **Redirects game-server hostnames** to your preservation server, via a
    `[dns]` table in `andapp_loader.ini` (hooks `getaddrinfo`/`GetAddrInfoW`).
-4. **Accepts any TLS certificate** so a self-signed preservation server works
-   (in-memory OpenSSL/libcurl patch; only this local client is affected).
+4. **Accepts any TLS certificate and defeats certificate pinning** so a
+   self-signed / renamed preservation server works. In memory it forces
+   `X509_verify_cert`→ok and `SSL_get_verify_result`→ok, no-ops
+   `SSL_CTX_set_verify` / `SSL_set_verify` / `SSL_CTX_set_cert_verify_callback`
+   (so the app can't install a pinning callback), and filters
+   `curl_easy_setopt` to force `SSL_VERIFYPEER/HOST/STATUS`→0 and drop
+   `PINNEDPUBLICKEY` / `SSL_CTX_FUNCTION`. Because libcurl is called by
+   `libcocos2d.dll` (not the exe), the curl hook is applied across **all loaded
+   modules**, with a short retry to catch lazily-loaded OpenSSL/curl. Only this
+   local client process is affected.
 5. **Neutralizes the single-instance mutex** so the game launches standalone.
 
 Everything is gated by `andapp_loader.ini`; delete or disable a section to turn

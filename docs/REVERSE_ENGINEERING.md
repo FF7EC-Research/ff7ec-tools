@@ -148,7 +148,26 @@ The replacement helper answers the billing verbs **safely**:
 * `request_purchase*` / `consume_purchase` → **decline** with an error
 
 It **never** emits `paymentSucceed` and never fabricates entitlements or
-receipts. The game also has server-side reverify flags (`ForcePurchaseReverify`,
+receipts.
+
+## 4a. TLS validation & pinning bypass (loader)
+
+FFBE's HTTPS runs through libcurl → OpenSSL. Verification is neutralized in
+memory at both layers so a recreated server's self-signed / mismatched cert is
+accepted and any certificate pinning is defeated:
+
+* OpenSSL: `X509_verify_cert`→1, `SSL_get_verify_result`→X509_V_OK, and
+  `SSL_CTX_set_verify` / `SSL_set_verify` / `SSL_CTX_set_cert_verify_callback`
+  made no-ops (leaves the default client `VERIFY_NONE`, and prevents a pinning
+  callback from replacing the neutralized default check).
+* libcurl (its own hostname match + pin live here, not in OpenSSL):
+  `curl_easy_setopt` is filtered — `SSL_VERIFYPEER`/`VERIFYHOST`/`VERIFYSTATUS`
+  forced to 0, `PINNEDPUBLICKEY` and `SSL_CTX_FUNCTION` dropped.
+
+libcurl is imported by `libcocos2d.dll`, not by the exe, so the `curl_easy_setopt`
+hook is installed across every loaded module (`hooks.cpp:iat_hook_all_modules`),
+with a ~10 s retry for lazily-loaded OpenSSL/curl. See `loader/hooks.cpp`
+`install_ssl_bypass()`. The game also has server-side reverify flags (`ForcePurchaseReverify`,
 `BUY_COIN_REVERIFY_*`), so spoofing a local success would fail reverification
 anyway — declining is both the honest and the robust choice.
 

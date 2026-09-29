@@ -1,17 +1,19 @@
 // hooks.cpp - IAT hooking, prologue patching, and the DNS / mutex / SSL hooks.
 #include "loader.h"
 #include <ws2tcpip.h>
+#include <tlhelp32.h>
 #include <algorithm>
+#include <vector>
 #pragma comment(lib, "ws2_32.lib")
 
 namespace loader {
 
-// ---- generic IAT hook --------------------------------------------------------
-// Walk the main module's import table and swap the thunk for (import_dll, func).
-bool iat_hook(const char* import_dll, const char* func, void* replacement,
-              void** original) {
-    HMODULE base = GetModuleHandleW(nullptr);
+// ---- generic IAT hook (single module) ---------------------------------------
+static bool iat_hook_module(HMODULE base, const char* import_dll,
+                            const char* func, void* replacement,
+                            void** original) {
     auto dos = (PIMAGE_DOS_HEADER)base;
+    if (dos->e_magic != IMAGE_DOS_SIGNATURE) return false;
     auto nt = (PIMAGE_NT_HEADERS)((BYTE*)base + dos->e_lfanew);
     auto imp_dir = nt->OptionalHeader
                        .DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT];
@@ -40,6 +42,34 @@ bool iat_hook(const char* import_dll, const char* func, void* replacement,
         }
     }
     return hooked;
+}
+
+// Hook the main image only (used for ws2_32 / kernel32 imports).
+bool iat_hook(const char* import_dll, const char* func, void* replacement,
+              void** original) {
+    return iat_hook_module(GetModuleHandleW(nullptr), import_dll, func,
+                           replacement, original);
+}
+
+// Hook the import in EVERY loaded module. Needed for libcurl, which is called
+// by libcocos2d.dll (and the SDK), not by the game exe directly.
+static int iat_hook_all_modules(const char* import_dll, const char* func,
+                                void* replacement, void** original) {
+    int count = 0;
+    HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPMODULE, 0);
+    if (snap == INVALID_HANDLE_VALUE) return 0;
+    MODULEENTRY32W me{};
+    me.dwSize = sizeof(me);
+    if (Module32FirstW(snap, &me)) {
+        do {
+            if (me.hModule == GetModuleHandleW(L"winmm.dll")) continue;  // skip self
+            if (iat_hook_module(me.hModule, import_dll, func, replacement,
+                                original))
+                ++count;
+        } while (Module32NextW(snap, &me));
+    }
+    CloseHandle(snap);
+    return count;
 }
 
 // ---- prologue patch: make a function return a constant -----------------------
@@ -158,55 +188,128 @@ void install_mutex_hooks() {
     logf("mutex hooks installed: CreateMutexW=%d CreateMutexExW=%d", (int)a, (int)b);
 }
 
-// ================= SSL / certificate bypass ==================================
-// FF_EXVIUS uses libcurl -> OpenSSL. We neutralize verification in memory so the
-// client accepts your preservation server's self-signed cert. This only affects
-// the local client process. Two well-known no-ops cover the OpenSSL path; we
-// also relax libcurl's easy handles as a belt-and-suspenders.
-static void patch_openssl(const wchar_t* mod) {
-    HMODULE h = GetModuleHandleW(mod);
-    if (!h) return;
-    struct { const char* fn; uint32_t ret; } t[] = {
-        {"X509_verify_cert", 1},        // 1 == success
-        {"SSL_get_verify_result", 0},   // 0 == X509_V_OK
-    };
-    for (auto& e : t) {
-        void* p = (void*)GetProcAddress(h, e.fn);
-        if (p && force_return(p, e.ret))
-            logf("ssl: patched %ls!%s -> %u", mod, e.fn, e.ret);
+// ================= SSL / certificate + pinning bypass ========================
+// FF_EXVIUS does HTTPS via libcurl -> OpenSSL. To accept any certificate from a
+// recreated preservation server (self-signed, hostname mismatch, and to defeat
+// certificate pinning) we neutralize verification on every layer, in memory.
+// This only affects this local client process.
+//
+// Layers covered:
+//   OpenSSL (libcrypto/libssl):
+//     X509_verify_cert                 -> 1  (chain always "valid")
+//     SSL_get_verify_result            -> 0  (X509_V_OK)
+//     SSL_CTX_set_verify / SSL_set_verify        -> no-op (can't force VERIFY_PEER
+//                                                  or install a per-cert callback)
+//     SSL_CTX_set_cert_verify_callback -> no-op (can't install a pinning callback
+//                                                  that replaces X509_verify_cert)
+//   libcurl (its OWN hostname check + pinning live here, not in OpenSSL):
+//     curl_easy_setopt filters:
+//       SSL_VERIFYPEER/HOST/STATUS -> 0     (chain, hostname, OCSP off)
+//       PINNEDPUBLICKEY            -> NULL  (drop public-key pin)
+//       SSL_CTX_FUNCTION           -> NULL  (drop app's custom SSL_CTX hook,
+//                                            a common place to add pinning)
+
+// Candidate module names across OpenSSL 1.0/1.1/3.x, 32/64-bit and legacy.
+static const wchar_t* kSslModules[] = {
+    L"libssl-1_1.dll", L"libssl-3.dll", L"libssl-3-x86.dll", L"ssleay32.dll",
+    L"libcrypto-1_1.dll", L"libcrypto-3.dll", L"libcrypto-3-x86.dll",
+    L"libeay32.dll",
+};
+
+// Force `fn` (found in whichever candidate module exports it) to return ret_val.
+static void patch_func_any(const char* fn, uint32_t ret_val) {
+    for (auto mod : kSslModules) {
+        HMODULE h = GetModuleHandleW(mod);
+        if (!h) continue;
+        void* p = (void*)GetProcAddress(h, fn);
+        if (p && force_return(p, ret_val))
+            logf("ssl: patched %ls!%s -> %u", mod, fn, ret_val);
     }
 }
 
-// libcurl: intercept curl_easy_setopt and force the two verify options off,
-// regardless of what the app requests.
-typedef int (WINAPI* curl_setopt_t)(void*, int, ...);
+static void patch_openssl_all() {
+    patch_func_any("X509_verify_cert", 1);
+    patch_func_any("SSL_get_verify_result", 0);
+    // Neutralize the "set verify" / pinning-callback installers (return value
+    // ignored by callers; making them no-ops keeps the default VERIFY_NONE).
+    patch_func_any("SSL_CTX_set_verify", 0);
+    patch_func_any("SSL_set_verify", 0);
+    patch_func_any("SSL_CTX_set_cert_verify_callback", 0);
+}
+
+// libcurl option ids (from curl.h): LONG=n, OBJECTPOINT=10000+n, FUNCTION=20000+n
+#define CURLOPT_SSL_VERIFYPEER    64
+#define CURLOPT_SSL_VERIFYHOST    81
+#define CURLOPT_SSL_VERIFYSTATUS  232
+#define CURLOPT_PINNEDPUBLICKEY   10230
+#define CURLOPT_SSL_CTX_FUNCTION  20108
+
+typedef int (__cdecl* curl_setopt_t)(void*, int, ...);
 static curl_setopt_t real_curl_setopt = nullptr;
-#define CURLOPT_SSL_VERIFYPEER 64
-#define CURLOPT_SSL_VERIFYHOST 81
+
 static int __cdecl hook_curl_easy_setopt(void* h, int opt, ...) {
     va_list ap; va_start(ap, opt);
-    // We must consume exactly one argument matching the option's type. For the
-    // two verify options the argument is a long; force it to 0.
-    if (opt == CURLOPT_SSL_VERIFYPEER || opt == CURLOPT_SSL_VERIFYHOST) {
-        va_end(ap);
-        return ((int(__cdecl*)(void*, int, long))real_curl_setopt)(h, opt, 0L);
-    }
-    // Pass through as a pointer-sized argument (works for the common cases).
+    // On x86 every parameter here (long / pointer / function ptr) is 4 bytes,
+    // so we can read one slot uniformly and rewrite it.
     void* arg = va_arg(ap, void*);
     va_end(ap);
+    switch (opt) {
+        case CURLOPT_SSL_VERIFYPEER:
+        case CURLOPT_SSL_VERIFYHOST:
+        case CURLOPT_SSL_VERIFYSTATUS:
+            arg = (void*)0;      // turn every verification off
+            logf("ssl: curl setopt %d forced to 0", opt);
+            break;
+        case CURLOPT_PINNEDPUBLICKEY:
+        case CURLOPT_SSL_CTX_FUNCTION:
+            arg = nullptr;       // strip pinning vectors
+            logf("ssl: curl setopt %d dropped (pinning)", opt);
+            break;
+        default:
+            break;
+    }
     return ((int(__cdecl*)(void*, int, void*))real_curl_setopt)(h, opt, arg);
 }
 
-void install_ssl_bypass() {
-    // Try both OpenSSL 1.1 and 3.x / legacy module names.
-    const wchar_t* mods[] = {L"libssl-1_1.dll", L"libssl-3.dll",
-                             L"ssleay32.dll", L"libcrypto-1_1.dll"};
-    for (auto m : mods) patch_openssl(m);
+static DWORD WINAPI ssl_late_watcher(LPVOID) {
+    for (int i = 0; i < 20; ++i) {   // ~10s @ 500ms
+        Sleep(500);
+        patch_openssl_all();
+        if (!real_curl_setopt) {
+            iat_hook_all_modules("libcurl.dll", "curl_easy_setopt",
+                                 (void*)hook_curl_easy_setopt,
+                                 (void**)&real_curl_setopt);
+        }
+    }
+    logf("ssl: late-load watcher finished");
+    return 0;
+}
 
-    if (iat_hook("libcurl.dll", "curl_easy_setopt",
-                 (void*)hook_curl_easy_setopt, (void**)&real_curl_setopt))
-        logf("ssl: hooked libcurl.dll!curl_easy_setopt");
-    logf("ssl bypass installed");
+void install_ssl_bypass() {
+    patch_openssl_all();
+
+    static bool curl_hooked = false;
+    if (!curl_hooked) {
+        int n = iat_hook_all_modules("libcurl.dll", "curl_easy_setopt",
+                                     (void*)hook_curl_easy_setopt,
+                                     (void**)&real_curl_setopt);
+        // Some builds name the import table entry with different casing.
+        if (!n)
+            n = iat_hook_all_modules("LIBCURL.dll", "curl_easy_setopt",
+                                     (void*)hook_curl_easy_setopt,
+                                     (void**)&real_curl_setopt);
+        if (n) { curl_hooked = true; logf("ssl: hooked curl_easy_setopt in %d module(s)", n); }
+        else   logf("ssl: curl_easy_setopt import not found yet");
+    }
+
+    // OpenSSL / libcurl may be loaded lazily. Re-apply the (idempotent) prologue
+    // patches and retry the curl hook for a short while to catch late loads.
+    static bool watcher = false;
+    if (!watcher) {
+        watcher = true;
+        CloseHandle(CreateThread(nullptr, 0, ssl_late_watcher, nullptr, 0, nullptr));
+    }
+    logf("ssl bypass installed (validation + pinning)");
 }
 
 }  // namespace loader
