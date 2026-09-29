@@ -46,6 +46,22 @@ python ipc_capture.py --listen 52100 --target 51100 --tag cmd --out handshake.lo
 Start real AndApp first (so the helper + cfg exist), run this, then launch the
 game. Ctrl-C restores the cfg. Stdlib only.
 
+## `andapp_mitm.py`
+**Decrypting** man-in-the-middle for the SDK↔helper IPC (`ipc_capture.py` is a
+passive tee and can't decrypt — the AES key is RSA-sealed to the game). This runs
+two handshakes (acts as the helper toward the game, as a client toward the real
+helper), so it can log the **plaintext** request/response of a real session.
+Since neither side authenticates its peer, it just works.
+
+```
+python andapp_mitm.py --selftest                                  # validate crypto
+python andapp_mitm.py --cfg "%APPDATA%\AndApp\AndAppHelper.cfg" --out mitm.log
+```
+Start the real AndApp, run this, launch a game that still works (e.g. FFRK) to
+capture the authoritative success responses for the shared SDK commands
+(`initialize`, `get_id_token`, …) — the schema the replacement helper must match.
+Requires `pip install pycryptodome`. Ctrl-C restores the cfg.
+
 ## manifest.json / `signature` (no tool — by design)
 `manifest.json`'s `signature[]` and the sibling `signature` file are 64-byte
 **asymmetric** signatures (ECDSA-P256/Ed25519, DeNA private key) and **cannot be
