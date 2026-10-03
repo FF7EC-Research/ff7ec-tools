@@ -124,9 +124,17 @@ were captured.
 
 ## Verification status (read before trusting this blind)
 
-- **KNOWN BROKEN right now: Morphe Manager loads this source's name/version
-  but reports 0 patches and no icon.** Root-caused, not yet fixed - see
-  "Why Manager shows 0 patches" below before rebuilding anything.
+- **FIXED and re-verified by a real CI build (run #14,
+  `8b00c69`/`5db9547`)**: the 0-patches/no-icon bug described below. The
+  published release asset (`morphe-patches` tag, `patches-0.1.0.mpp`) now
+  contains one top-level `classes.dex` (373 KB) alongside the same
+  `dev/ff7ecpreservation/patches/*.class` files as before (D8 dexes, it
+  doesn't replace, the compiled output) - confirmed directly with `unzip -l`
+  against the downloaded release asset, matching the real `morphe-patches`
+  release's shape exactly. `extensions/ff7ec.mpe` and
+  `ff7ec_shim/libff7ec_shim.so` are still bundled unchanged. See "Why
+  Manager shows 0 patches" below for the root cause and fix, kept for the
+  reasoning even though the bug itself is gone.
 - **`shim/`**: compiles and links clean (`-Wall -Wextra`, zero warnings)
   against NDK r26c for arm64-v8a, including the full build.sh pipeline that
   produces the exact bytes bundled into the patch. The FFI struct/enum
@@ -209,20 +217,27 @@ latest release `.mpp`, and `crimera/piko`'s source, provided as a known-good
   module itself when built via `./gradlew :patches:generatePatchesList`.
 - The real repos' release automation
   ([`.releaserc`](https://github.com/MorpheApp/morphe-patches/blob/main/.releaserc))
-  calls `./gradlew generatePatchesList` too - same task we run - but that's
-  only the *prepare* step of `gradle-semantic-release-plugin`, which itself
-  runs `./gradlew publish` to actually version and publish the artifact.
-  **We have never run `:patches:publish`**, only `:patches:generatePatchesList`
-  (which depends on the plain `build`/`jar` task, not whatever dexes the
-  jar for publishing). The missing dex step is most likely wired onto
-  `publish`, not onto `jar`/`build`/`generatePatchesList`.
-- **Not yet confirmed** (needs a real build to check, which needs the
-  `MORPHE_GPR_USER`/`MORPHE_GPR_TOKEN` registry credentials again): whether
-  `./gradlew :patches:publish` actually produces the dexed jar without a
-  real publish destination configured, or whether there's a more specific
-  task (check `./gradlew :patches:tasks --all` once credentials are
-  available) that does the dexing without requiring a configured Maven
-  repository to publish to.
+  calls `./gradlew generatePatchesList` too - same task we were running -
+  but that's only the *prepare* step of `gradle-semantic-release-plugin`,
+  which itself runs `./gradlew publish` to actually version and publish
+  the artifact. We had never run anything that dexes the module.
+
+**Fixed**: `./gradlew :patches:tasks --all` (once registry credentials were
+available) turned up the actual task doing it - `buildAndroid`: *"Builds
+the project for Android by compiling to DEX and adding it to the patches
+file."* Not `publish` after all. The workflow now runs
+`./gradlew :patches:buildAndroid :patches:generatePatchesList --no-daemon`
+(see the release workflow) - `buildAndroid` first so the jar
+`generatePatchesList` reads from is the same dexed one that gets
+published. Re-verified against a real CI build (run #14): the published
+`.mpp` now has the `classes.dex` entry described above.
+
+Getting that CI run green also needed one unrelated fix: `ubuntu-latest`'s
+preinstalled Android SDK `cmdline-tools` - which the "Accept Android SDK
+licenses"/`sdkmanager` steps depended on - is no longer reliably present
+or on `PATH` on the runner image (this had silently started failing even
+before the dex fix; see CI run history). Now installs a known
+`cmdline-tools` build fresh instead of assuming one is already there.
 - Separately, **`icon.png` was never what Manager looks at** for the
   source's own icon in the app list - see `patches-bundle.png` above. That
   part's fixed as of this commit.
