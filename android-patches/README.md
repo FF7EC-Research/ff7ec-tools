@@ -134,13 +134,28 @@ were captured.
   plugin to apply its DSL to it at all; a `gradle/libs.versions.toml`
   version catalog (the plugin's own conventions expect one); and a Gradle
   wrapper pinned to 9.3.1 (AGP's minimum, newer than most systems' default
-  `gradle`) - all now committed. Still outstanding: `compatibleWith(PACKAGE_NAME)`
-  uses the deprecated bare-string overload (a `Compatibility` object with
-  real version/icon metadata is the real convention) and the inner
-  `ff7ecShimFilesPatch` logs a "universal patches must default false"
-  warning - both cosmetic (the build succeeds either way), not yet fixed
-  because fixing them needs another verified rebuild to confirm, which
-  needs registry credentials again.
+  `gradle`) - all now committed.
+
+  That first successful build still had two gaps, now fixed in
+  `Ff7ecShimPatch.kt` against the real `Compatibility`/`AppTarget`/
+  `ApkFileType` source in
+  [`MorpheApp/morphe-patcher`](https://github.com/MorpheApp/morphe-patcher/blob/main/src/main/kotlin/app/morphe/patcher/patch/Compatibility.kt):
+  `compatibleWith(PACKAGE_NAME)` used the deprecated bare-string overload,
+  which produces a `Compatibility` with no `apkFileType` and an
+  any-version target - `compatiblePackages[0].apkFileType`/`targets[0].version`
+  were both `null` in the committed `patches-list.json`. Replaced with a
+  real `Compatibility(... apkFileType = ApkFileType.XAPK_REQUIRED,
+  targets = listOf(AppTarget(version = "4.0.0", versionCode = 126, minSdk
+  = 24)))` - `XAPK_REQUIRED` because that's genuinely how this game is
+  distributed (a flat single APK wouldn't carry the arm64-v8a split this
+  patch needs). Also gave `ff7ecShimFilesPatch` `default = false`,
+  clearing the "universal patches must default false" warning.
+  **`patches-list.json`/`patches-bundle.json`/`patches-0.1.0.mpp` at this
+  root are from the build *before* this fix** - regenerating them is a
+  Gradle job (`./gradlew :patches:generatePatchesList`), not something to
+  hand-edit, and this environment doesn't have registry credentials
+  available right now to run it again. Treat those three files as one
+  commit stale until the next real build.
 - **Not yet confirmed on-device**: whether `EntryApplication` has any of its
   own anti-tamper/signature checks that would reject a patched APK (none
   were found in the limited static inspection done so far), and the exact

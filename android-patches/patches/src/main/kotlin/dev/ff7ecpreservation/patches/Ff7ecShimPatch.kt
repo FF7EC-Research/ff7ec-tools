@@ -18,6 +18,9 @@ package dev.ff7ecpreservation.patches
 
 import app.morphe.patcher.Fingerprint
 import app.morphe.patcher.extensions.InstructionExtensions.addInstructions
+import app.morphe.patcher.patch.ApkFileType
+import app.morphe.patcher.patch.AppTarget
+import app.morphe.patcher.patch.Compatibility
 import app.morphe.patcher.patch.PatchException
 import app.morphe.patcher.patch.booleanOption
 import app.morphe.patcher.patch.bytecodePatch
@@ -34,6 +37,26 @@ private const val CONFIG_ASSET_ENTRY = "assets/ff7ec_shim.cfg"
 private const val BRIDGE_INIT_CALL =
     "Ldev/ff7ecpreservation/extension/Ff7ecShimBridge;->init(Landroid/content/Context;)V"
 
+// versionName/versionCode/minSdk/icon color verified against the installed
+// XAPK (see ../../../README.md). The game is distributed (at least via
+// APKPure, where this was sourced) as an XAPK - a single flat APK won't
+// carry the arm64-v8a native split this patch needs - hence XAPK_REQUIRED.
+// Only arm64-v8a is supported, matching the shim's own arm64-only build.
+private val COMPATIBILITY_FF7EC = Compatibility(
+    packageName = PACKAGE_NAME,
+    name = "FF7EC",
+    description = "Final Fantasy VII Ever Crisis",
+    apkFileType = ApkFileType.XAPK_REQUIRED,
+    appIconColor = 0xA785E1,
+    targets = listOf(
+        AppTarget(
+            version = "4.0.0",
+            versionCode = 126,
+            minSdk = 24,
+        ),
+    ),
+)
+
 internal object EntryApplicationAttachBaseContextFingerprint : Fingerprint(
     definingClass = ENTRY_APPLICATION_CLASS,
     name = "attachBaseContext",
@@ -49,6 +72,10 @@ internal object EntryApplicationAttachBaseContextFingerprint : Fingerprint(
 private val ff7ecShimFilesPatch = resourcePatch(
     name = "FF7EC network shim (files)",
     description = "Bundles the native preservation shim and its configuration into the APK.",
+    // Only ever runs as ff7ecShimPatch's dependency (below), never offered
+    // on its own - and a patch with no compatiblePackages ("universal")
+    // must default to off.
+    default = false,
 ) {
     val sslBypass by booleanOption(
         key = "sslBypass",
@@ -107,11 +134,11 @@ val ff7ecShimPatch = bytecodePatch(
         "bypass, decrypted on-device traffic logging, and an optional DNS redirect.",
     default = true,
 ) {
-    compatibleWith(PACKAGE_NAME)
+    compatibleWith(COMPATIBILITY_FF7EC)
     dependsOn(ff7ecShimFilesPatch)
-    // Merges the dex from ../../../../extension (the Ff7ecShimBridge/ToastRunner classes)
-    // into the patched APK - built by the `extension` Gradle plugin block in
-    // ../../../extension/build.gradle.kts.
+    // Merges the dex from ../../../../extensions/ff7ec (the Ff7ecShimBridge/
+    // ToastRunner classes) into the patched APK - built by the `extension`
+    // Gradle plugin block in ../../../extensions/ff7ec/build.gradle.kts.
     extendWith("extensions/ff7ec.mpe")
 
     execute {
