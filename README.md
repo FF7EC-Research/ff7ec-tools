@@ -1,47 +1,32 @@
-# ffbe-JP-andapp — preservation toolkit
+# ff7ec-tools — preservation toolkit
 
-Interoperability / preservation tooling for the AndApp (DMM/DeNA) build of
-*Final Fantasy Brave Exvius* JP (`FF_EXVIUS.exe`, build **10.0.0**). The goal is
-to keep a client you own runnable after the AndApp platform's end of service:
-launch the game without the official AndApp desktop client, decrypt its own
-assets, and point it at a community preservation server.
-
-This is not a piracy project. Purchases are **disabled**, not spoofed — the
-helper never fabricates a successful payment or entitlement.
+Interoperability / preservation tooling for *Final Fantasy VII Ever Crisis*
+(Square Enix / Applibot), built ahead of its announced end of service on
+**October 5, 2026**. This repository exists under the Stop Killing Games
+banner: once the servers go down, nothing here can reach them anymore, so the
+only window for recording how the client and server actually talk to each
+other is now.
 
 ## Layout
 
 | Path | What |
 |---|---|
-| [`tools/cocos_ccz.py`](tools/cocos_ccz.py) | Decrypt/re-pack cocos2d-x CCZp assets (XXTEA key recovered) |
-| [`tools/patch_ssl.py`](tools/patch_ssl.py) | Disable TLS cert verification for a self-signed preservation server |
-| [`loader/`](loader/) | Drop-in `winmm.dll` loader: hosts the AndApp helper, DNS redirect, SSL bypass, mutex fix — no extra program to run |
-| [`docs/REVERSE_ENGINEERING.md`](docs/REVERSE_ENGINEERING.md) | Full findings: assets, helper IPC, payment surface, handshake |
-| [`docs/VersionAndApp.decrypted.xml`](docs/VersionAndApp.decrypted.xml) | Decrypted sample (proof the key works) |
+| [`loader/`](loader/) | Drop-in `winmm.dll`: redirects the game's own traffic to a local proxy, decrypts it with the sibling [`ff7ecapi`](../ff7ecapi) research repo's documented key material, and logs it |
+| [`tests/`](tests/) | Native (no Windows/Wine needed) unit tests for the decoder |
 
 ## Quick start
 
-1. **Decrypt assets**
-   ```
-   python tools/cocos_ccz.py decrypt VersionAndApp.xml
-   ```
-2. **Build the loader** (32-bit) and drop it next to the game
+1. Build the loader (64-bit - see [`loader/README.md`](loader/README.md)):
    ```
    cd loader && build.bat          REM or: build.bat mingw
-   copy winmm.dll andapp_loader.ini  <game folder>
    ```
-3. **Edit `andapp_loader.ini`** — set the `[dns]` redirects to your preservation
-   server; leave `[helper]`, `[ssl]`, `[mutex]` enabled.
-4. **Run `FF_EXVIUS.exe`.** Read `andapp_loader.log` to see what happened.
+2. Copy `winmm.dll` + `ff7ec_loader.ini` next to the game's `.exe`.
+3. Run the game. `ff7ec_loader.log` records what the loader did;
+   `ff7ec_traffic.log` records the decrypted request/response traffic.
 
-## Status
-The SDK↔helper **session handshake is implemented** (`loader/helper_server.cpp`):
-8-byte framing + a CryptoAPI RSA/AES key exchange + AES-256-CBC JSON, reconstructed
-from a live capture (`docs/REVERSE_ENGINEERING.md` §5). CCZ decryption, the JSON
-command layer, payment stub, DNS redirect, SSL/pinning bypass, CEF switches, mutex
-fix and the winmm proxy are all done, and the loader compiles to a clean 32-bit
-drop-in DLL.
+## Scope
 
-What remains is refining the **response JSON schema**: the helper holds the session
-key and logs every *decrypted* request to `andapp_loader.log`, so one run of the
-game reveals the exact fields each verb must return.
+This only affects the local game client you run it against, on your own
+machine, against the host its own client was already configured to talk to.
+It does not spoof purchases, fabricate server responses, or send anything
+anywhere beyond that one connection.
