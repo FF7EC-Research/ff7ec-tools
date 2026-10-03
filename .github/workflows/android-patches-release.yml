@@ -1,0 +1,109 @@
+# Builds the FF7EC Morphe patch bundle (android-patches/) and publishes it
+# as a release under the fixed tag `morphe-patches`, so Morphe Manager/CLI
+# always has one stable URL for the latest build - re-running this moves
+# that tag to the new commit rather than piling up versioned releases.
+#
+# Requires registry credentials this org may not have (see the "Resolve
+# the Morphe registry credentials" step below): android-patches/README.md
+# explains why and what to set. Without them, the `./gradlew` step fails
+# with a 401/403 resolving app.morphe:* - that's a credentials problem,
+# not a bug here.
+name: Build and release Morphe patches
+
+on:
+  push:
+    paths:
+      - "android-patches/**"
+      - ".github/workflows/android-patches-release.yml"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+env:
+  NDK_VERSION: "26.2.11394342" # matches android-patches/README.md (NDK r26c)
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: android-patches
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Android SDK (cmdline-tools, platform-tools)
+        uses: android-actions/setup-android@v3
+
+      - name: Install the NDK + CMake
+        run: yes | sdkmanager --install "ndk;${NDK_VERSION}" "cmake;3.22.1"
+
+      - name: Build the native shim (libff7ec_shim.so, arm64-v8a)
+        working-directory: android-patches/shim
+        run: ANDROID_NDK="$ANDROID_SDK_ROOT/ndk/${NDK_VERSION}" ./build.sh
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      # The `app.morphe.patches` Gradle plugin and `app.morphe:morphe-patches-library`
+      # live in a private registry (maven.pkg.github.com/MorpheApp/registry) -
+      # android-patches/settings.gradle.kts reads credentials from the Gradle
+      # properties `gpr.user`/`gpr.key`, falling back to GITHUB_ACTOR/GITHUB_TOKEN.
+      # The default GITHUB_TOKEN this workflow gets is scoped to THIS repo and
+      # will very likely not be accepted for another org's package registry -
+      # set the MORPHE_GPR_USER/MORPHE_GPR_TOKEN repo secrets (a GitHub PAT with
+      # read:packages, authorized for the MorpheApp org/registry) to fix that.
+      - name: Resolve the Morphe registry credentials
+        run: |
+          {
+            echo "gpr.user=${MORPHE_GPR_USER:-$GITHUB_ACTOR}"
+            echo "gpr.key=${MORPHE_GPR_TOKEN:-$GH_TOKEN}"
+          } >> gradle.properties
+        env:
+          MORPHE_GPR_USER: ${{ secrets.MORPHE_GPR_USER }}
+          MORPHE_GPR_TOKEN: ${{ secrets.MORPHE_GPR_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build the patch bundle (.mpp) and regenerate patches-list.json
+        run: ./gradlew :patches:generatePatchesList --no-daemon
+
+      - name: Locate the built .mpp
+        id: mpp
+        run: |
+          mpp=$(find patches/build/libs -maxdepth 1 -name '*.mpp' -not -name '*sources*' -not -name '*javadoc*' | head -1)
+          test -n "$mpp"
+          echo "path=$mpp" >> "$GITHUB_OUTPUT"
+          echo "name=$(basename "$mpp")" >> "$GITHUB_OUTPUT"
+
+      # The real patches-bundle.json points at the release asset that carries
+      # this exact build - fill that in now that we know the asset name. All
+      # dynamic values come in as env vars (no GitHub expressions inside the
+      # script itself) to keep this a plain, unambiguous Python script.
+      - name: Write patches-bundle.json for this build
+        run: python3 ../.github/scripts/write_patches_bundle.py
+        env:
+          MPP_NAME: ${{ steps.mpp.outputs.name }}
+          REPOSITORY: ${{ github.repository }}
+          COMMIT_SHA: ${{ github.sha }}
+          REF_NAME: ${{ github.ref_name }}
+
+      - name: Publish the "morphe-patches" release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: morphe-patches
+          name: Morphe patches
+          body: |
+            Automated build from ${{ github.sha }} (${{ github.ref_name }}).
+            Add this repository to Morphe Manager/CLI as a custom patch source,
+            or download `${{ steps.mpp.outputs.name }}` directly.
+          make_latest: true
+          files: |
+            android-patches/${{ steps.mpp.outputs.path }}
+            android-patches/patches-list.json
+            android-patches/patches-bundle.json

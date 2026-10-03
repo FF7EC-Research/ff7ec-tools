@@ -33,6 +33,24 @@ build runs (CI, or locally with registry credentials), `download_url` /
 `signature_download_url` in `patches-bundle.json` should point at the
 published `.mpp`/signature, and both files should be regenerated for real.
 
+### CI: building and releasing the `.mpp`
+
+[`.github/workflows/android-patches-release.yml`](../.github/workflows/android-patches-release.yml)
+builds the native shim, runs `./gradlew :patches:generatePatchesList`
+(building the `.mpp` and regenerating `patches-list.json` for real), and
+publishes everything under a release tagged **`morphe-patches`** - a fixed
+tag the workflow moves on every run, so that's always one stable URL for
+the latest build. Triggers on any push touching `android-patches/**`, plus
+manual runs.
+
+**It needs registry credentials this org may not have set**: add repo
+secrets `MORPHE_GPR_USER` / `MORPHE_GPR_TOKEN` (a GitHub PAT with
+`read:packages`, authorized for the `MorpheApp` org's package registry) -
+without them the workflow falls back to the default `GITHUB_TOKEN`, which
+is scoped to this repo and will likely be rejected by `MorpheApp`'s
+registry with a 401/403. That's the one thing blocking this from actually
+succeeding today, same root cause as the "not build-verified" note above.
+
 ## What changed since `ff7ecapi`/`loader` were written - read this first
 
 Pulling the current XAPK and inspecting `libil2cpp.so` turned up a complete
