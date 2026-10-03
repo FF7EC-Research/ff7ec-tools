@@ -50,21 +50,24 @@ jobs:
           distribution: temurin
           java-version: "17"
 
-      # ubuntu-latest runners ship an Android SDK ($ANDROID_SDK_ROOT /
-      # $ANDROID_HOME set) with cmdline-tools installed, but NOT on PATH -
-      # its sdkmanager has to be found under cmdline-tools/*/bin and added
-      # to PATH explicitly. android-actions/setup-android just wraps that
-      # same sdkmanager, and does so badly: it requests the legacy "tools"
-      # package, which Google removed from the repository entirely, so its
-      # call fails outright ("Failed to find package 'tools'") before it
-      # even gets to licenses. Skipping that action and calling the
-      # runner's own sdkmanager directly for exactly what's needed avoids
-      # both problems.
-      - name: Locate the preinstalled Android cmdline-tools
+      # android-actions/setup-android wraps sdkmanager badly: it requests the
+      # legacy "tools" package, which Google removed from the repository
+      # entirely, so its call fails outright ("Failed to find package
+      # 'tools'") before it even gets to licenses. Calling sdkmanager
+      # directly for exactly what's needed avoids that - but ubuntu-latest's
+      # preinstalled SDK location/cmdline-tools presence isn't something to
+      # rely on (it has changed under us before), so install a known-good
+      # cmdline-tools build fresh rather than searching for one.
+      - name: Install the Android cmdline-tools
         run: |
-          sdkmanager_path=$(find "$ANDROID_SDK_ROOT/cmdline-tools" -maxdepth 2 -name sdkmanager -type f | sort -V | tail -1)
-          test -n "$sdkmanager_path"
-          echo "$(dirname "$sdkmanager_path")" >> "$GITHUB_PATH"
+          : "${ANDROID_SDK_ROOT:=$HOME/android-sdk}"
+          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT" >> "$GITHUB_ENV"
+          mkdir -p "$ANDROID_SDK_ROOT/cmdline-tools"
+          curl -fsSL -o /tmp/cmdline-tools.zip \
+            "https://dl.google.com/android/repository/commandlinetools-linux-13114758_latest.zip"
+          unzip -q /tmp/cmdline-tools.zip -d "$ANDROID_SDK_ROOT/cmdline-tools"
+          mv "$ANDROID_SDK_ROOT/cmdline-tools/cmdline-tools" "$ANDROID_SDK_ROOT/cmdline-tools/latest"
+          echo "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
 
       - name: Accept Android SDK licenses
         run: yes | sdkmanager --licenses
