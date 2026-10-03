@@ -12,17 +12,19 @@
       "compatiblePackages": [
         {
           "packageName": "com.square_enix.android_googleplay.ff7ecww",
-          "name": null,
-          "description": null,
-          "apkFileType": null,
-          "appIconColor": null,
+          "name": "FF7EC",
+          "description": "Final Fantasy VII Ever Crisis",
+          "apkFileType": "XAPK_REQUIRED",
+          "appIconColor": "#A785E1",
           "signatures": null,
           "targets": [
             {
-              "version": null,
-              "versionCodes": null,
+              "version": "4.0.0",
+              "versionCodes": {
+                "ARM64_V8A": 126
+              },
               "isExperimental": false,
-              "minSdk": null,
+              "minSdk": 24,
               "description": null
             }
           ]

@@ -22,6 +22,7 @@ import app.morphe.patcher.patch.ApkFileType
 import app.morphe.patcher.patch.AppTarget
 import app.morphe.patcher.patch.Compatibility
 import app.morphe.patcher.patch.PatchException
+import app.morphe.patcher.patch.SupportedAbi
 import app.morphe.patcher.patch.booleanOption
 import app.morphe.patcher.patch.bytecodePatch
 import app.morphe.patcher.patch.resourcePatch
@@ -51,7 +52,11 @@ private val COMPATIBILITY_FF7EC = Compatibility(
     targets = listOf(
         AppTarget(
             version = "4.0.0",
-            versionCode = 126,
+            // Only arm64-v8a, not the AppTarget(version, versionCode, ...)
+            // convenience constructor's "same code for every ABI" shortcut -
+            // the shim is arm64-only, and arm64-v8a is the only split this
+            // XAPK (and the patch) actually has/needs.
+            versionCodes = mapOf(SupportedAbi.ARM64_V8A to 126),
             minSdk = 24,
         ),
     ),
