@@ -89,16 +89,26 @@ first time a given `yaha_*` name is looked up. `getaddrinfo` (used for the
 optional DNS redirect) *is* a normal static import of the Rust library, so
 that one is a plain GOT/PLT hook.
 
-### The three patches
+### The patches
 
-All three are options on one patch (`FF7EC network shim`), not separate
-patches, since they share one native shim and one injection point.
+`FF7EC network shim` installs the native library and the `EntryApplication`
+hook (always on by default); the three features below are each their own
+independently selectable patch - `Disable TLS certificate verification`,
+`Log decrypted traffic`, `Redirect DNS lookups` - matching how every other
+Morphe patches repo (`crimera/piko`, `MorpheApp/morphe-patches`) lists
+features, rather than hiding them behind one patch's option dialog. All
+four `dependsOn` back to a shared, hidden `FF7EC network shim (files)`
+patch (bundles the `.so`, creates an empty config asset) - each feature
+patch just appends its own line to that asset when selected; a deselected
+one simply doesn't run, so its line is absent and the shim's own defaults
+(`shim/config.h`) apply. See `patches/src/main/kotlin/dev/ff7ecpreservation/
+patches/Ff7ecShimPatch.kt` and `Ff7ecShimOptionsPatches.kt`.
 
-1. **Disable TLS certificate verification** (`sslBypass`, default **on**).
+1. **Disable TLS certificate verification** (default **on**).
    Hooks `yaha_build_client` to call the library's own
    `yaha_client_config_skip_certificate_verification(ctx, true)` before the
    client is built - the same technique the public writeup above describes.
-2. **Log decrypted traffic** (`packetLog`, default **on**). Hooks
+2. **Log decrypted traffic** (default **on**). Hooks
    `yaha_init_context`'s three response callbacks and the
    `yaha_request_*` setters/writer to capture each request/response's
    method, URI, headers and body - all **already plaintext** at this FFI
@@ -110,10 +120,12 @@ patches, since they share one native shim and one injection point.
    `Android/data/<package>/files/ff7ec_logs/ff7ec_traffic.log` - the app's
    own external-files directory, needing no storage permission on any SDK
    level.
-3. **Redirect DNS lookups** (`dnsRedirect`, default **off** - packet
-   logging above doesn't need it, since it reads the app's own buffers
-   rather than the network). Hooks `getaddrinfo`; the target IP is a Morphe
-   patch *option* (a text field at patch time), not a runtime setting.
+3. **Redirect DNS lookups** (default **off** - packet logging above
+   doesn't need it, since it reads the app's own buffers rather than the
+   network). Hooks `getaddrinfo`; the target IP is a required `stringOption`
+   on this patch (a text field at patch time, the same gear-configurable
+   pattern as `crimera/piko`'s `Change version code` patch), not a runtime
+   setting.
    Logs the real resolved address either way (this lives in `dns_hook.cpp`
    regardless of whether the redirect itself is enabled, so you always get
    a record of what the game connected to when packet logging is on).
