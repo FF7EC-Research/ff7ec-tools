@@ -93,8 +93,15 @@ jobs:
           MORPHE_GPR_TOKEN: ${{ secrets.MORPHE_GPR_TOKEN }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      # buildAndroid (compiles the patches module to DEX and adds it to the
+      # jar) is a separate task from generatePatchesList's own `build`
+      # dependency, which only produces plain JVM .class files - a jar with
+      # no .dex entries fails to load any patches in Morphe Manager
+      # (confirmed: see android-patches/README.md, "Why Manager shows 0
+      # patches"). Must run before generatePatchesList so the list is read
+      # from the same dexed jar that gets packaged.
       - name: Build the patch bundle (.mpp) and regenerate patches-list.json
-        run: ./gradlew :patches:generatePatchesList --no-daemon
+        run: ./gradlew :patches:buildAndroid :patches:generatePatchesList --no-daemon
 
       - name: Locate the built .mpp
         id: mpp
