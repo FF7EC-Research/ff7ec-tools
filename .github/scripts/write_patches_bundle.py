@@ -17,7 +17,11 @@ with open("patches-list.json") as f:
     version = json.load(f)["version"]
 
 bundle = {
-    "created_at": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"),
+    # No "+00:00"/"Z" suffix: Morphe Manager parses this as kotlinx.datetime's
+    # LocalDateTime (app/src/main/java/app/morphe/manager/network/dto/MorpheAsset.kt),
+    # which rejects an offset - a UTC-aware isoformat() breaks the whole asset
+    # fetch, surfacing as "unnamed" + "failed to download changelog" in the app.
+    "created_at": datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None).isoformat(timespec="seconds"),
     "description": f"Built from {repository}@{commit_sha} ({ref_name}).",
     "download_url": f"https://github.com/{repository}/releases/download/morphe-patches/{mpp_name}",
     "signature_download_url": "",
