@@ -34,6 +34,10 @@ env:
 jobs:
   build:
     runs-on: ubuntu-latest
+    # Ties this job to the repo's "MorpheApps" Environment (Settings ->
+    # Environments), so MORPHE_GPR_USER/MORPHE_GPR_TOKEN can be stored as
+    # that Environment's own secrets instead of repo-wide ones.
+    environment: MorpheApps
     defaults:
       run:
         working-directory: android-patches

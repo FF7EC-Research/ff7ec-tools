@@ -184,8 +184,11 @@ from `android-patches/` unless noted.
   `read:packages`, authorized for the `MorpheApp` org, so Gradle can
   resolve `app.morphe.patches` and `app.morphe:morphe-patches-library`
   from `maven.pkg.github.com/MorpheApp/registry`. In CI this comes from
-  the `MORPHE_GPR_USER`/`MORPHE_GPR_TOKEN` repo secrets (see "CI" below);
-  locally, export them as `ORG_GRADLE_PROJECT_gpr.user` /
+  the `MORPHE_GPR_USER`/`MORPHE_GPR_TOKEN` secrets on the repo's
+  **`MorpheApps` Environment** (Settings -> Environments -> `MorpheApps`
+  -> Environment secrets - not repo-wide secrets; the workflow job
+  declares `environment: MorpheApps`, see "CI" below); locally, export
+  them as `ORG_GRADLE_PROJECT_gpr.user` /
   `ORG_GRADLE_PROJECT_gpr.key`, or add `gpr.user=...` / `gpr.key=...` to
   `~/.gradle/gradle.properties`.
 
@@ -284,9 +287,12 @@ runs steps 1-6 automatically (using
 for step 6, which updates the existing `morphe-patches` release in place
 rather than erroring on the reused tag) on every push that touches a
 subfolder here, plus manual runs, and commits the regenerated
-`patches-list.json`/`patches-bundle.json` back to the repo afterward. It
-needs the `MORPHE_GPR_USER`/`MORPHE_GPR_TOKEN` repo secrets from step 0 to
-actually succeed - without them it fails at step 3 with a 401/403.
+`patches-list.json`/`patches-bundle.json` back to the repo afterward. Its
+job declares `environment: MorpheApps`, so it needs the
+`MORPHE_GPR_USER`/`MORPHE_GPR_TOKEN` secrets set on that repo Environment
+(Settings -> Environments -> `MorpheApps`, create it if it doesn't exist
+yet) to actually succeed - without them it fails at step 3 with a
+401/403.
 
 ## Scope
 
