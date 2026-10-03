@@ -21,4 +21,4 @@ plugins {
 }
 
 include(":patches")
-include(":extension")
+include(":extensions:ff7ec")

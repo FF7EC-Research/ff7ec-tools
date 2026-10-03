@@ -57,8 +57,11 @@ jobs:
       - name: Accept Android SDK licenses
         run: yes | sdkmanager --licenses
 
-      - name: Install platform-tools, the NDK, and CMake
-        run: sdkmanager --install "platform-tools" "ndk;${NDK_VERSION}" "cmake;3.22.1"
+      # platforms;android-36 + build-tools;36.0.0 are what the extensions/ff7ec
+      # Android library module (AGP, via the app.morphe.patches plugin)
+      # actually needs to compile - confirmed by running this build for real.
+      - name: Install platform-tools, the NDK, CMake, and the Android 36 platform
+        run: sdkmanager --install "platform-tools" "ndk;${NDK_VERSION}" "cmake;3.22.1" "platforms;android-36" "build-tools;36.0.0"
 
       - name: Build the native shim (libff7ec_shim.so, arm64-v8a)
         working-directory: android-patches/shim
