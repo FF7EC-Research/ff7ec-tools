@@ -258,10 +258,13 @@ runs steps 1-6 automatically (using
 [`softprops/action-gh-release`](https://github.com/softprops/action-gh-release)
 for step 6, which updates the existing `morphe-patches` release in place
 rather than erroring on the reused tag) on every push that touches a
-subfolder here, plus manual runs, and commits the regenerated
-`patches-list.json`/`patches-bundle.json` back to the repo afterward. It
-needs the `MORPHE_GPR_USER`/`MORPHE_GPR_TOKEN` repo secrets from step 0 to
-actually succeed - without them it fails at step 3 with a 401/403.
+subfolder here, plus manual runs. It only ever publishes the regenerated
+`patches-list.json`/`patches-bundle.json` as release assets - **it never
+commits anything back to the repo**; the checked-in copies at the repo
+root stay whatever they were last hand-updated to, and the release always
+has the current ones. It needs the `MORPHE_GPR_USER`/`MORPHE_GPR_TOKEN`
+repo secrets from step 0 to actually succeed - without them it fails at
+step 3 with a 401/403.
 
 ## Scope
 

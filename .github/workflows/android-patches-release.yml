@@ -16,10 +16,8 @@ on:
       # Subfolders only - a change to a root-level file directly in
       # android-patches/ (README.md, icon.png, gradle.properties,
       # settings.gradle.kts, patches-list.json, patches-bundle.json) does
-      # NOT trigger this on its own. That matters because this workflow
-      # commits updated patches-list.json/patches-bundle.json back to that
-      # same root (see the "Commit..." step below) - without this exclusion
-      # that commit would retrigger itself.
+      # NOT trigger this on its own; only shim/, patches/, or extension/
+      # changes do.
       - "android-patches/**"
       - "!android-patches/*"
       - ".github/workflows/android-patches-release.yml"
@@ -109,19 +107,11 @@ jobs:
           COMMIT_SHA: ${{ github.sha }}
           REF_NAME: ${{ github.ref_name }}
 
-      # Persists the freshly-regenerated patches-list.json and
-      # patches-bundle.json (new date, current version, real download_url)
-      # back to the repo, so the checked-in copies stay current rather than
-      # only existing as release assets. Safe from a trigger loop: both
-      # files are root-level, and the path filter above excludes those.
-      - name: Commit the regenerated manifests
-        uses: stefanzweifel/git-auto-commit-action@v5
-        with:
-          commit_message: "android-patches: update patches-list.json/patches-bundle.json [skip ci]"
-          file_pattern: "android-patches/patches-list.json android-patches/patches-bundle.json"
-          commit_user_name: "github-actions[bot]"
-          commit_user_email: "github-actions[bot]@users.noreply.github.com"
-
+      # These regenerated patches-list.json/patches-bundle.json are published
+      # as release assets below ONLY - this workflow never commits them (or
+      # anything else) back to the repo. The checked-in copies at the repo
+      # root are a point-in-time snapshot; the release always has the real,
+      # current ones for whoever's consuming this as a Morphe source.
       - name: Publish the "morphe-patches" release
         uses: softprops/action-gh-release@v2
         with:
