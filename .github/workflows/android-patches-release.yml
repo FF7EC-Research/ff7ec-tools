@@ -50,14 +50,22 @@ jobs:
           distribution: temurin
           java-version: "17"
 
-      # ubuntu-latest runners already ship an Android SDK (cmdline-tools +
-      # sdkmanager on PATH, $ANDROID_SDK_ROOT set) - android-actions/setup-android
-      # just wraps that same sdkmanager, and does so badly: it requests the
-      # legacy "tools" package, which Google removed from the repository
-      # entirely, so its call fails outright ("Failed to find package
-      # 'tools'") before it even gets to licenses. Skipping that action and
-      # calling the runner's own sdkmanager directly for exactly what's
-      # needed avoids both problems.
+      # ubuntu-latest runners ship an Android SDK ($ANDROID_SDK_ROOT /
+      # $ANDROID_HOME set) with cmdline-tools installed, but NOT on PATH -
+      # its sdkmanager has to be found under cmdline-tools/*/bin and added
+      # to PATH explicitly. android-actions/setup-android just wraps that
+      # same sdkmanager, and does so badly: it requests the legacy "tools"
+      # package, which Google removed from the repository entirely, so its
+      # call fails outright ("Failed to find package 'tools'") before it
+      # even gets to licenses. Skipping that action and calling the
+      # runner's own sdkmanager directly for exactly what's needed avoids
+      # both problems.
+      - name: Locate the preinstalled Android cmdline-tools
+        run: |
+          sdkmanager_path=$(find "$ANDROID_SDK_ROOT/cmdline-tools" -maxdepth 2 -name sdkmanager -type f | sort -V | tail -1)
+          test -n "$sdkmanager_path"
+          echo "$(dirname "$sdkmanager_path")" >> "$GITHUB_PATH"
+
       - name: Accept Android SDK licenses
         run: yes | sdkmanager --licenses
 
