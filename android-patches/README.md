@@ -1,0 +1,130 @@
+# FF7EC Android preservation patchset (Morphe)
+
+A [Morphe](https://github.com/MorpheApp/morphe-patches) patchset for the
+Android build of *FF7 Ever Crisis* (package
+`com.square_enix.android_googleplay.ff7ecww`, verified against the
+installed XAPK at **versionName 4.0.0 / versionCode 126**). Installs a small
+native shim for preservation research on your own device, ahead of the
+game's announced end of service (October 5, 2026).
+
+## What changed since `ff7ecapi`/`loader` were written - read this first
+
+Pulling the current XAPK and inspecting `libil2cpp.so` turned up a complete
+protocol migration since the sibling [`ff7ecapi`](../../ff7ecapi) research
+repo and the PC [`loader`](../../loader) were written (both target the old
+app version, `1.3.20`): **every old marker is gone** (`post_pvt_*`,
+`X-OCTO-KEY`, the old hostname, the AES-256-CBC+LZ4+protobuf REST body
+cipher) - the game now runs **gRPC via MagicOnion**, over
+**Grpc.Net.Client** + **Cysharp's YetAnotherHttpHandler** (a Rust/hyper/
+rustls 0.22 native HTTP/2 client, `libCysharp.Net.Http.YetAnotherHttpHandler.Native.so`).
+`libgrpc_csharp_ext.so` (x86/x64/arm64 strings all present) suggests the PC
+build moved to the same stack, though that's unconfirmed - the PC `loader`
+was built before this was discovered and targets the old protocol; it likely
+needs a follow-up pass.
+
+This turned out to make the patches *easier*, not harder: the native
+library's own FFI surface already exposes what we need (see
+`shim/yaha_shim.cpp`'s header comment and
+[the public source](https://github.com/Cysharp/YetAnotherHttpHandler) for
+exact signatures, commit `2dfd96c`), and a public writeup
+([blog.vibbit.me](https://blog.vibbit.me/2026/08/qa-grpc-yaha/)) describes
+hooking this exact library the same way for a different game, which this
+design follows.
+
+## Architecture
+
+```
+EntryApplication.attachBaseContext()        <- the game's own Application
+    System.loadLibrary("ff7ec_shim")           subclass; earliest safe point
+    Ff7ecShimBridge.init(this)                 to load a native library from
+        |
+        v
+libff7ec_shim.so  (JNI_OnLoad does nothing; bridge.cpp's init() does the work)
+    bridge_init()        - caches JavaVM + Context (Toasts, log directory)
+    load_config()         - reads assets/ff7ec_shim.cfg (written by the patch
+                             from its options at patch time)
+    install_yaha_hooks() - the three traffic patches (see below)
+    install_dns_hook()   - if dns_redirect or packet_log is on
+```
+
+IL2CPP resolves every `[DllImport]` target via its own `dlopen()`+`dlsym()`
+at first use, not a static ELF dependency - so the yaha_* hooks are
+installed by **interposing `dlsym` itself** (GOT/PLT-hooked across every
+loaded module, see `shim/elf_hook.*`), substituting our own trampoline the
+first time a given `yaha_*` name is looked up. `getaddrinfo` (used for the
+optional DNS redirect) *is* a normal static import of the Rust library, so
+that one is a plain GOT/PLT hook.
+
+### The three patches
+
+All three are options on one patch (`FF7EC network shim`), not separate
+patches, since they share one native shim and one injection point.
+
+1. **Disable TLS certificate verification** (`sslBypass`, default **on**).
+   Hooks `yaha_build_client` to call the library's own
+   `yaha_client_config_skip_certificate_verification(ctx, true)` before the
+   client is built - the same technique the public writeup above describes.
+2. **Log decrypted traffic** (`packetLog`, default **on**). Hooks
+   `yaha_init_context`'s three response callbacks and the
+   `yaha_request_*` setters/writer to capture each request/response's
+   method, URI, headers and body - all **already plaintext** at this FFI
+   boundary (it's below TLS, not above it), so no interception, proxy, or
+   certificate is needed for this one. Bodies are split on gRPC's
+   length-prefixed framing and protobuf-dumped schema-lessly (ported from
+   `../../loader/decode.cpp`'s dumper - the AES/LZ4 part of that file is
+   *not* reused, see above). Written to
+   `Android/data/<package>/files/ff7ec_logs/ff7ec_traffic.log` - the app's
+   own external-files directory, needing no storage permission on any SDK
+   level.
+3. **Redirect DNS lookups** (`dnsRedirect`, default **off** - packet
+   logging above doesn't need it, since it reads the app's own buffers
+   rather than the network). Hooks `getaddrinfo`; the target IP is a Morphe
+   patch *option* (a text field at patch time), not a runtime setting.
+   Logs the real resolved address either way (this lives in `dns_hook.cpp`
+   regardless of whether the redirect itself is enabled, so you always get
+   a record of what the game connected to when packet logging is on).
+
+**Toasts**: one when hooks finish installing, and one (one-shot) the first
+time a captured request or response body is successfully protobuf-decoded -
+i.e. confirmation that decryption is actually working, not just that bytes
+were captured.
+
+## Verification status (read before trusting this blind)
+
+- **`shim/`**: compiles and links clean (`-Wall -Wextra`, zero warnings)
+  against NDK r26c for arm64-v8a, including the full build.sh pipeline that
+  produces the exact bytes bundled into the patch. The FFI struct/enum
+  layouts and function signatures are taken directly from YetAnotherHttpHandler's
+  own public source, not guessed.
+- **`patches/`, `extension/`**: written to match several real, current
+  Morphe patch repositories' verified conventions (`bytecodePatch`/
+  `resourcePatch`/`booleanOption`/`stringOption`, the `extension { name =
+  ... }` Gradle plugin block + `extendWith(...)`, fingerprint-based method
+  targeting) - but **not build-verified**: `app.morphe:morphe-patches-library`
+  and the `app.morphe.patches` Gradle plugin live in a registry this
+  environment has no credentials for, so `./gradlew build` here was never
+  run to completion. Treat the Kotlin/Gradle side as "written to spec,
+  needs one real build to confirm" rather than tested.
+- **Not yet confirmed on-device**: whether `EntryApplication` has any of its
+  own anti-tamper/signature checks that would reject a patched APK (none
+  were found in the limited static inspection done so far), and the exact
+  shape of `on_receive`'s delivery for a client-streaming or bidi
+  MagicOnion StreamingHub call (unary calls - the overwhelming majority of
+  a game's API traffic - are handled correctly; a streaming hub currently
+  gets one combined dump per completed stream rather than per-message).
+
+## Build
+
+```sh
+cd shim && ANDROID_NDK=/path/to/ndk ./build.sh    # produces patches/src/main/resources/ff7ec_shim/libff7ec_shim.so
+cd .. && ./gradlew :patches:build                 # needs MorpheApp registry credentials (gpr.user/gpr.key)
+```
+Then run the resulting patch bundle against the XAPK's base + `config.arm64_v8a`
+APKs with Morphe Manager/CLI, choosing the options you want.
+
+## Scope
+
+Everything here runs only inside this one patched copy of the game, on your
+own device, and only touches the network connection the game's own client
+was already making. It never fabricates a server response or spoofs a
+purchase.
