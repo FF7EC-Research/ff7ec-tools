@@ -33,23 +33,9 @@ build runs (CI, or locally with registry credentials), `download_url` /
 `signature_download_url` in `patches-bundle.json` should point at the
 published `.mpp`/signature, and both files should be regenerated for real.
 
-### CI: building and releasing the `.mpp`
-
-[`.github/workflows/android-patches-release.yml`](../.github/workflows/android-patches-release.yml)
-builds the native shim, runs `./gradlew :patches:generatePatchesList`
-(building the `.mpp` and regenerating `patches-list.json` for real), and
-publishes everything under a release tagged **`morphe-patches`** - a fixed
-tag the workflow moves on every run, so that's always one stable URL for
-the latest build. Triggers on any push touching `android-patches/**`, plus
-manual runs.
-
-**It needs registry credentials this org may not have set**: add repo
-secrets `MORPHE_GPR_USER` / `MORPHE_GPR_TOKEN` (a GitHub PAT with
-`read:packages`, authorized for the `MorpheApp` org's package registry) -
-without them the workflow falls back to the default `GITHUB_TOKEN`, which
-is scoped to this repo and will likely be rejected by `MorpheApp`'s
-registry with a 401/403. That's the one thing blocking this from actually
-succeeding today, same root cause as the "not build-verified" note above.
+Building and releasing this (by hand or in CI) is covered step by step in
+["Building and packaging a release"](#building-and-packaging-a-release)
+below.
 
 ## What changed since `ff7ecapi`/`loader` were written - read this first
 
@@ -157,14 +143,125 @@ were captured.
   a game's API traffic - are handled correctly; a streaming hub currently
   gets one combined dump per completed stream rather than per-message).
 
-## Build
+## Building and packaging a release
+
+This is the exact sequence
+[`.github/workflows/android-patches-release.yml`](../.github/workflows/android-patches-release.yml)
+runs on every push to a subfolder here - written out so it can be run by
+hand too (e.g. to test a change before pushing it). All commands are run
+from `android-patches/` unless noted.
+
+### 0. Prerequisites
+
+- **JDK 17** (`temurin` or equivalent).
+- **Android SDK cmdline-tools** with `sdkmanager` on `PATH` and
+  `$ANDROID_SDK_ROOT` set. GitHub's `ubuntu-latest` runners already have
+  this; on your own machine, install the
+  [command-line tools package](https://developer.android.com/studio#command-line-tools-only).
+- A **Morphe registry PAT**: a GitHub personal access token with
+  `read:packages`, authorized for the `MorpheApp` org, so Gradle can
+  resolve `app.morphe.patches` and `app.morphe:morphe-patches-library`
+  from `maven.pkg.github.com/MorpheApp/registry`. In CI this comes from
+  the `MORPHE_GPR_USER`/`MORPHE_GPR_TOKEN` repo secrets (see "CI" below);
+  locally, export them as `ORG_GRADLE_PROJECT_gpr.user` /
+  `ORG_GRADLE_PROJECT_gpr.key`, or add `gpr.user=...` / `gpr.key=...` to
+  `~/.gradle/gradle.properties`.
+
+### 1. Install the Android SDK packages this build needs
 
 ```sh
-cd shim && ANDROID_NDK=/path/to/ndk ./build.sh    # produces patches/src/main/resources/ff7ec_shim/libff7ec_shim.so
-cd .. && ./gradlew :patches:build                 # needs MorpheApp registry credentials (gpr.user/gpr.key)
+yes | sdkmanager --licenses
+sdkmanager --install "platform-tools" "ndk;26.2.11394342" "cmake;3.22.1"
 ```
-Then run the resulting patch bundle against the XAPK's base + `config.arm64_v8a`
-APKs with Morphe Manager/CLI, choosing the options you want.
+(`ndk;26.2.11394342` is NDK r26c, the version the shim is built/tested
+against - see `shim/build.sh`. The legacy `tools` package some older
+guides mention no longer exists in Google's repository; don't install it.)
+
+### 2. Build the native shim
+
+```sh
+cd shim
+ANDROID_NDK="$ANDROID_SDK_ROOT/ndk/26.2.11394342" ./build.sh
+cd ..
+```
+Compiles `libff7ec_shim.so` (arm64-v8a) and writes the stripped result to
+`patches/src/main/resources/ff7ec_shim/libff7ec_shim.so` - where the
+Kotlin patch (`Ff7ecShimPatch.kt`) bundles it from. Do this *before* the
+Gradle build below; the resource has to already be on disk.
+
+### 3. Build the patch bundle and regenerate `patches-list.json`
+
+```sh
+./gradlew :patches:generatePatchesList
+```
+This one task does both things, in order (see
+`patches/build.gradle.kts`): `:patches:build` produces the `.mpp`, then
+`generatePatchesList` (from `app.morphe.util.PatchListGeneratorKt`, in
+`morphe-patches-library`) inspects that build's own manifest and patch
+metadata and overwrites `patches-list.json` here with the real thing -
+replacing any hand-authored/stale copy.
+
+### 4. Find the built `.mpp`
+
+```sh
+ls patches/build/libs/*.mpp
+```
+There should be exactly one (ignore any `-sources`/`-javadoc` jars next
+to it, which `generatePatchesList` already does when picking its input).
+
+### 5. Update `patches-bundle.json`
+
+Fill in the real build info - version (read it back out of the
+`patches-list.json` you just regenerated), a fresh `created_at`, and
+`download_url` pointing at where the `.mpp` will live once published
+(the convention here: a GitHub release tagged `morphe-patches`, asset
+named exactly like the file from step 4):
+
+```json
+{
+  "created_at": "<UTC timestamp, e.g. date -u +%Y-%m-%dT%H:%M:%S>",
+  "description": "Built from <repo>@<commit> (<branch>).",
+  "download_url": "https://github.com/<owner>/<repo>/releases/download/morphe-patches/<mpp filename>",
+  "signature_download_url": "",
+  "version": "<the version from patches-list.json>"
+}
+```
+(CI does this with [`.github/scripts/write_patches_bundle.py`](../.github/scripts/write_patches_bundle.py)
+rather than by hand.)
+
+### 6. Publish the release
+
+Tag: **`morphe-patches`** - a single fixed tag that moves to whatever
+commit was just built, rather than a new tag per build, so there's always
+one stable URL for the latest version. Using the `gh` CLI:
+
+```sh
+gh release delete morphe-patches --yes --cleanup-tag 2>/dev/null  # if one already exists
+gh release create morphe-patches \
+  patches/build/libs/*.mpp patches-list.json patches-bundle.json \
+  --title "Morphe patches" \
+  --notes "Built from $(git rev-parse HEAD) ($(git branch --show-current))."
+```
+
+### 7. Install it
+
+Add this repository to Morphe Manager/CLI as a custom patch source (it
+reads `patches-list.json`/`patches-bundle.json` at the repo root - see
+"Repo layout" above), or download the `.mpp` from the release directly and
+point Morphe at it, then patch the XAPK's base + `config.arm64_v8a` APKs,
+choosing the options you want.
+
+### Doing this in CI instead
+
+[`.github/workflows/android-patches-release.yml`](../.github/workflows/android-patches-release.yml)
+runs steps 1-6 automatically (using
+[`softprops/action-gh-release`](https://github.com/softprops/action-gh-release)
+for step 6, which updates the existing `morphe-patches` release in place
+rather than erroring on the reused tag) on every push that touches a
+subfolder here, plus manual runs, and commits the regenerated
+`patches-list.json`/`patches-bundle.json` back to the repo afterward. It
+needs the `MORPHE_GPR_USER`/`MORPHE_GPR_TOKEN` repo secrets from step 0 to
+actually succeed - without them it fails at step 3 with a 401/403.
 
 ## Scope
 
