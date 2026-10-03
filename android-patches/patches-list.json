@@ -1,0 +1,83 @@
+{
+  "NOTE": "Hand-authored to match the schema app.morphe.util.PatchListGeneratorKt produces (see MorpheApp/morphe-patches-library), since this repo has no credentials for the private Morphe artifact registry to run the real Gradle release pipeline here. Regenerate this file for real once that's run - see android-patches/README.md.",
+  "version": "0.1.0",
+  "patches": [
+    {
+      "name": "FF7EC network shim",
+      "description": "Installs the FF7 Ever Crisis preservation shim: optional TLS-verification bypass, decrypted on-device traffic logging, and an optional DNS redirect.",
+      "default": true,
+      "category": null,
+      "dependencies": [
+        "ResourcePatch"
+      ],
+      "compatiblePackages": [
+        {
+          "packageName": "com.square_enix.android_googleplay.ff7ecww",
+          "name": "FF7EC",
+          "description": "Final Fantasy VII Ever Crisis",
+          "apkFileType": "APK",
+          "appIconColor": "#A785E1",
+          "signatures": null,
+          "targets": [
+            {
+              "version": "4.0.0",
+              "versionCodes": {
+                "ARM64_V8A": 126
+              },
+              "isExperimental": false,
+              "minSdk": 24,
+              "description": null
+            }
+          ]
+        }
+      ],
+      "options": []
+    },
+    {
+      "name": "FF7EC network shim (files)",
+      "description": "Bundles the native preservation shim and its configuration into the APK.",
+      "default": true,
+      "category": null,
+      "dependencies": [],
+      "compatiblePackages": null,
+      "options": [
+        {
+          "key": "sslBypass",
+          "title": "Disable TLS certificate verification",
+          "description": "Lets the client accept any TLS certificate, so preservation traffic capture works without a trusted cert on this device.",
+          "required": false,
+          "type": "kotlin.Boolean",
+          "default": true,
+          "values": null
+        },
+        {
+          "key": "packetLog",
+          "title": "Log decrypted traffic",
+          "description": "Writes decrypted gRPC request/response bodies under the app's own external-files folder: Android/data/com.square_enix.android_googleplay.ff7ecww/files/ff7ec_logs/ (no storage permission needed - it's the app's own directory).",
+          "required": false,
+          "type": "kotlin.Boolean",
+          "default": true,
+          "values": null
+        },
+        {
+          "key": "dnsRedirect",
+          "title": "Redirect DNS lookups",
+          "description": "Redirects the game's own hostname lookups to the Redirect IP below. Off by default: traffic logging works without it, since it reads the game's own already-decrypted buffers rather than intercepting the connection.",
+          "required": false,
+          "type": "kotlin.Boolean",
+          "default": false,
+          "values": null
+        },
+        {
+          "key": "redirectIp",
+          "title": "Redirect IP",
+          "description": "Only used when 'Redirect DNS lookups' is enabled above.",
+          "required": false,
+          "type": "kotlin.String",
+          "default": "",
+          "values": null
+        }
+      ]
+    }
+  ]
+}
