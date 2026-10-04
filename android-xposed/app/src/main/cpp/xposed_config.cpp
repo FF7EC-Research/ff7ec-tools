@@ -8,6 +8,13 @@
 extern "C" JNIEXPORT void JNICALL
 Java_dev_ff7ecpreservation_extension_Ff7ecShimBridge_configureXposed(JNIEnv*, jclass) {
     shim::Config& cfg = shim::config();
-    cfg.ssl_bypass = false;               // passive logging only, no need to touch TLS
-    cfg.log_dir_absolute = "/sdcard/ff7ec-logs";
+    cfg.ssl_bypass = false;  // passive logging only, no need to touch TLS
+    // log_dir_absolute deliberately left empty: log_directory()
+    // (android_bridge.cpp) then falls back to getExternalFilesDir() - the
+    // game's own app-private folder under
+    // /sdcard/Android/data/<package>/files/ff7ec_logs/, which needs no
+    // storage permission at all (it's always exempt from scoped storage,
+    // unlike /sdcard/ff7ec-logs/ which needed MANAGE_EXTERNAL_STORAGE
+    // granted to the game on Android 11+). Same behavior as the Morphe
+    // patch's own copy - see android-patches/README.md.
 }

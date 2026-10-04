@@ -36,9 +36,26 @@ android {
         }
     }
 
+    // Committed debug.keystore, not a secret - same convention as the
+    // debug.keystore Android Studio generates for every developer, with
+    // a universally-known password ("android"). Signing release builds
+    // with it (rather than leaving them unsigned) means every build, CI
+    // or local, has the same signature, so `adb install -r` always works
+    // to update an existing install instead of needing an uninstall
+    // first. LSPosed itself doesn't care what signs a module.
+    signingConfigs {
+        create("release") {
+            storeFile = file("../debug.keystore")
+            storePassword = "android"
+            keyAlias = "ff7ecxposed"
+            keyPassword = "android"
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
+            signingConfig = signingConfigs.getByName("release")
         }
     }
 
