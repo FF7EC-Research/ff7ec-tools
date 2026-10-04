@@ -12,6 +12,14 @@ struct Config {
     bool        dns_redirect        = false;   // off by default: logging doesn't need it
     std::string redirect_ip;                   // the Morphe patch option text field
     std::string log_dir_name        = "ff7ec_logs";
+    // Empty (default): log_directory() derives a path under the app's own
+    // getExternalFilesDir() - no storage permission needed, used by the
+    // Morphe patch. Non-empty: log_directory() uses this exact path
+    // instead (creating it if needed) - used by ../../../android-xposed
+    // to write to shared storage (e.g. "/sdcard/ff7ec-logs"), which does
+    // need WRITE_EXTERNAL_STORAGE/MANAGE_EXTERNAL_STORAGE granted to the
+    // hooked app for the write to actually succeed on Android 10+.
+    std::string log_dir_absolute;
 };
 
 Config& config();

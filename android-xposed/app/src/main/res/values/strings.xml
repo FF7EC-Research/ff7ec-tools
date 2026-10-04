@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">FF7EC Traffic Logger</string>
+    <string name="module_description">Logs FF7 Ever Crisis\'s decrypted gRPC traffic (sent/received) to /sdcard/ff7ec-logs. No APK patching - hooks the stock, unmodified game via Xposed/LSPosed.</string>
+</resources>

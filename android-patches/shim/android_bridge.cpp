@@ -70,6 +70,11 @@ void show_toast(const std::string& text) {
 
 std::string log_directory() {
     if (!g_log_dir_cache.empty()) return g_log_dir_cache;
+    if (!config().log_dir_absolute.empty()) {
+        mkdir(config().log_dir_absolute.c_str(), 0755);
+        g_log_dir_cache = config().log_dir_absolute;
+        return g_log_dir_cache;
+    }
     if (!g_vm || !g_context) return "";
     ScopedEnv se;
     if (!se.env) return "";

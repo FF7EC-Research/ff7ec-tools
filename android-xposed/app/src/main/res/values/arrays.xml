@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Limits LSPosed's "manage scope" UI for this module to just the game,
+         so it never needs enabling for anything else. -->
+    <array name="xposed_scope">
+        <item>com.square_enix.android_googleplay.ff7ecww</item>
+    </array>
+</resources>
