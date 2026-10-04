@@ -106,10 +106,31 @@ struct HookArgs {
     int count;
 };
 
+// Android platform partitions - system libraries (libart.so, libc.so, ...)
+// live here. These are routinely built with cross-DSO CFI (Control Flow
+// Integrity): calling through a GOT slot we've redirected to a replacement
+// in a *different* DSO (ours) doesn't match the CFI type metadata the
+// original call site expects, and CFI's trap handler aborts - silently (no
+// Abort message) and with a near-useless backtrace, exactly what a real
+// device produced the first time this function actually ran (see
+// ../../../../README.md's "Why install_yaha_hooks() crashed" for how this
+// was diagnosed). IL2CPP/Unity/YAHA are never in these partitions anyway -
+// they're always app-private libraries under /data/app/..., so skipping
+// platform libraries entirely costs nothing for what this hook is for.
+bool is_platform_library(const char* path) {
+    if (!path) return false;
+    static const char* const prefixes[] = {"/apex/", "/system/", "/system_ext/", "/vendor/", "/product/"};
+    for (auto* prefix : prefixes) {
+        if (strncmp(path, prefix, strlen(prefix)) == 0) return true;
+    }
+    return false;
+}
+
 int hook_one_module(dl_phdr_info* info, size_t, void* data) {
     auto* args = (HookArgs*)data;
     if (args->module_substr && (!info->dlpi_name || !strstr(info->dlpi_name, args->module_substr)))
         return 0;
+    if (is_platform_library(info->dlpi_name)) return 0;
     ModuleDynInfo m;
     if (!find_dynamic(info, m)) return 0;
     bool hit = false;

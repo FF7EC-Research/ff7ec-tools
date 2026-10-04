@@ -269,6 +269,7 @@ static void* hook_dlsym(void* handle, const char* name) {
 }
 
 void install_yaha_hooks() {
+    LOGT("yaha: install_yaha_hooks() starting");
     // skip_certificate_verification is called BY our own shim_build_client, not
     // by the app, so it may never otherwise be dlsym'd - resolve it directly.
     real::yaha_client_config_skip_certificate_verification =

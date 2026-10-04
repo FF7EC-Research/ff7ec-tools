@@ -16,7 +16,11 @@ extern "C" JNIEXPORT void JNICALL
 Java_dev_ff7ecpreservation_extension_Ff7ecShimBridge_nativeInit(JNIEnv* env, jclass, jobject context) {
     LOGT("bridge: nativeInit() called from EntryApplication.attachBaseContext");
     shim::bridge_init(env, context);
+    LOGT("bridge: bridge_init() done");
     shim::load_config(env, context);
+    LOGT("bridge: load_config() done");
     shim::install_yaha_hooks();
+    LOGT("bridge: install_yaha_hooks() done");
     if (shim::config().dns_redirect || shim::config().packet_log) shim::install_dns_hook();
+    LOGT("bridge: nativeInit() done");
 }

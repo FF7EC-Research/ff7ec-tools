@@ -8,6 +8,14 @@
 // land in `replacement` instead. `*out_original` receives the value the slot
 // held before the first hook (the real function, for forwarding).
 //
+// Platform libraries (/apex/, /system/, /system_ext/, /vendor/, /product/)
+// are always skipped, regardless of module_substr - confirmed on-device
+// (see ../../../../README.md): one of them is cross-DSO CFI-hardened, and a
+// GOT slot redirected to a replacement in a different DSO trips CFI's
+// indirect-call type check, which aborts with no message and an
+// unsymbolized backtrace. IL2CPP/Unity/YAHA are never in these partitions
+// anyway - only the app's own libraries under /data/app/... are.
+//
 // Scope note: this only ever rewrites a GOT entry whose *name* matches one we
 // deliberately chose (getaddrinfo, dlsym); it does not disassemble, relocate,
 // or alter any function's own code.

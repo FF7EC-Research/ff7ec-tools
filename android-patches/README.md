@@ -113,14 +113,37 @@ were found and fixed getting here, in order:
    that line runs dereferences a null `mBase`. Fixed by passing `p1`
    (`base`) instead - the system-supplied Context, already fully valid
    regardless of whether `super.attachBaseContext()` has run yet.
+3. With *that* fixed, `nativeInit()` ran further than ever before and the
+   app crashed a third way: `SIGABRT` again, but this time with **no**
+   `Abort message:` at all and a useless 3-frame backtrace (`abort`,
+   a misattributed libc symbol, then `<unknown>`) - identical on every
+   retry. That signature (silent abort, degraded unwind, fully
+   deterministic) is what Android's **CFI** (Control Flow Integrity) trap
+   handler produces, not a normal crash. Cause: `install_yaha_hooks()`'s
+   `elf_hook_symbol("dlsym", ...)` rewrites the `dlsym` GOT slot in *every*
+   loaded module process-wide (via `dl_iterate_phdr`), including Android's
+   own cross-DSO-CFI-hardened platform libraries (`libart.so` etc.) - a
+   call through a GOT slot redirected to a replacement in a different DSO
+   (ours) doesn't match the CFI type metadata the original call site
+   expects, and CFI aborts rather than letting it through. This is the
+   first bug of the three that CI couldn't have caught even in principle:
+   it only manifests with CFI enforcement active on the real device,
+   which a desktop/CI build has no way to reproduce. Fixed in
+   `shim/elf_hook.cpp`: `hook_one_module` now skips any module under
+   `/apex/`, `/system/`, `/system_ext/`, `/vendor/`, or `/product/`
+   unconditionally - IL2CPP/Unity/YAHA are never in those partitions
+   anyway, only the app's own libraries under `/data/app/...` are, so this
+   costs nothing for what the hook is actually for. **Not yet re-verified
+   on-device.**
 
 IL2CPP resolves every `[DllImport]` target via its own `dlopen()`+`dlsym()`
 at first use, not a static ELF dependency - so the yaha_* hooks are
 installed by **interposing `dlsym` itself** (GOT/PLT-hooked across every
-loaded module, see `shim/elf_hook.*`), substituting our own trampoline the
-first time a given `yaha_*` name is looked up. `getaddrinfo` (used for the
-optional DNS redirect) *is* a normal static import of the Rust library, so
-that one is a plain GOT/PLT hook.
+*app-private* loaded module - platform libraries are skipped, see above
+and `shim/elf_hook.*`), substituting our own trampoline the first time a
+given `yaha_*` name is looked up. `getaddrinfo` (used for the optional DNS
+redirect) *is* a normal static import of the Rust library, so that one is
+a plain GOT/PLT hook.
 
 ### The patches
 
@@ -174,25 +197,33 @@ were captured.
 
 ## Verification status (read before trusting this blind)
 
-- **Two real on-device crashes found and fixed via `adb logcat`, in
-  sequence - still not fully clean, see below.** First: a patch+install
-  run (real `app.morphe.manager` 1.33.0, patcher 1.15.0, a real XAPK)
-  opened to a black screen and closed instantly, logcat showing
-  `java.lang.VerifyError` rejecting `attachBaseContext` (the injected
-  smali's `const-string v0` footgun). Fixed and re-verified by patching
-  again: the `VerifyError` was gone, `attachBaseContext` →
-  `Ff7ecShimBridge.init()` → `nativeInit()` → `bridge_init()` all ran -
-  but the app then crashed **natively** with `SIGABRT`
-  (`JNI DETECTED ERROR IN APPLICATION: obj == null in call to
-  GetLongField`, inside `AAssetManager_fromJava`, from `load_config()`'s
-  `context.getAssets()` call returning null). Root cause and fix: see
-  "Architecture" above - passing `p0` ("this") before
-  `super.attachBaseContext()` runs dereferences a null `mBase`; now
-  passes `p1` (`base`) instead. **Not yet re-verified on-device** (needs
-  another patch + install cycle against this exact fix) - that's the
-  next thing to confirm. Given two real bugs have now been found this
-  way in a row, budget for a third until an install actually reaches a
-  working main menu.
+- **Three real on-device crashes found and fixed in sequence via `adb
+  logcat`/tombstones - still not fully clean, see below.** Each fix was
+  re-verified by patching again and getting *further* before the next
+  crash, not by assumption:
+  1. Black screen, instant close. `java.lang.VerifyError` rejecting
+     `attachBaseContext` (the injected smali's `const-string v0`
+     footgun). Fixed by moving `loadLibrary` into `Ff7ecShimBridge.init()`.
+  2. Re-patched: the `VerifyError` was gone, `attachBaseContext` →
+     `Ff7ecShimBridge.init()` → `nativeInit()` → `bridge_init()` all ran -
+     then a native `SIGABRT` (`JNI DETECTED ERROR IN APPLICATION: obj ==
+     null in call to GetLongField`, inside `AAssetManager_fromJava`, from
+     `load_config()`'s `context.getAssets()` returning null). Fixed by
+     passing `p1` (`base`) instead of `p0` ("this") into the hook.
+  3. Re-patched again: `load_config()` succeeded this time -
+     `install_yaha_hooks()` ran for the first time ever - and a *third*
+     `SIGABRT`, this one with no `Abort message:` at all and a degraded
+     3-frame backtrace, identical on every retry: Android CFI rejecting
+     our system-wide `dlsym` GOT hook inside a platform library. Fixed in
+     `shim/elf_hook.cpp` by skipping `/apex/`, `/system/`, `/system_ext/`,
+     `/vendor/`, `/product/` modules entirely.
+
+  See "Architecture" above for the full detail on each. **Not yet
+  re-verified on-device** (needs another patch + install cycle against
+  this exact fix) - that's the next thing to confirm. Given three real
+  bugs have now been found this way in a row, each only surfacing once
+  the previous one was fixed, budget for a fourth until an install
+  actually reaches a working main menu.
 - **FIXED and re-verified by a real CI build (run #14,
   `8b00c69`/`5db9547`)**: the 0-patches/no-icon bug described below. The
   published release asset (`morphe-patches` tag, `patches-0.1.0.mpp`) now
