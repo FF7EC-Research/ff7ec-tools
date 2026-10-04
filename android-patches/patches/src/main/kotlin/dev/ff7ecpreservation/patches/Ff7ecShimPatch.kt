@@ -78,9 +78,17 @@ internal object EntryApplicationAttachBaseContextFingerprint : Fingerprint(
  * Ff7ecShimOptionsPatches.kt each independently `dependsOn` this (so the
  * file exists before they append to it) and are what actually populate it -
  * this patch itself writes no config lines, only the native library.
+ *
+ * Deliberately unnamed, matching how crimera/piko's own internal/shared
+ * infra patches (e.g. hookFlagsPatch) do it: per the Morphe docs, "only
+ * patches with a name are loaded" - an unnamed patch is excluded from
+ * patches-list.json and Manager's UI entirely, rather than merely
+ * defaulting to off. Naming it ("FF7EC network shim (files)", as before)
+ * left it sitting in the list right next to "FF7EC network shim" looking
+ * like a near-duplicate entry, even though it was never independently
+ * selectable.
  */
 internal val ff7ecShimFilesPatch = resourcePatch(
-    name = "FF7EC network shim (files)",
     description = "Bundles the native preservation shim into the APK.",
     // Only ever runs as a dependency (below), never offered on its own -
     // and a patch with no compatiblePackages ("universal") must default

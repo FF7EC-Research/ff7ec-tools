@@ -97,12 +97,16 @@ independently selectable patch - `Disable TLS certificate verification`,
 `Log decrypted traffic`, `Redirect DNS lookups` - matching how every other
 Morphe patches repo (`crimera/piko`, `MorpheApp/morphe-patches`) lists
 features, rather than hiding them behind one patch's option dialog. All
-four `dependsOn` back to a shared, hidden `FF7EC network shim (files)`
-patch (bundles the `.so`, creates an empty config asset) - each feature
-patch just appends its own line to that asset when selected; a deselected
-one simply doesn't run, so its line is absent and the shim's own defaults
-(`shim/config.h`) apply. See `patches/src/main/kotlin/dev/ff7ecpreservation/
-patches/Ff7ecShimPatch.kt` and `Ff7ecShimOptionsPatches.kt`.
+four `dependsOn` back to a shared, unnamed infra patch (bundles the `.so`,
+creates an empty config asset) - deliberately given no `name` (the Morphe
+docs: "only patches with a name are loaded"), so it's excluded from
+`patches-list.json` and Manager's UI entirely rather than sitting next to
+`FF7EC network shim` looking like a near-duplicate, the way its earlier
+named version did. Each feature patch just appends its own line to that
+asset when selected; a deselected one simply doesn't run, so its line is
+absent and the shim's own defaults (`shim/config.h`) apply. See
+`patches/src/main/kotlin/dev/ff7ecpreservation/patches/Ff7ecShimPatch.kt`
+and `Ff7ecShimOptionsPatches.kt`.
 
 1. **Disable TLS certificate verification** (default **on**).
    Hooks `yaha_build_client` to call the library's own
