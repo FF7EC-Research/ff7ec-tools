@@ -5,7 +5,9 @@
  * hooks EntryApplication.attachBaseContext() - the game's own custom
  * Application subclass, confirmed from the installed APK's manifest, and
  * the earliest safe point to System.loadLibrary() from - to load it before
- * any Unity/network code runs.
+ * any Unity/network code runs. The hook passes attachBaseContext's own
+ * `base` Context parameter (p1), not "this" (p0) - see Ff7ecShimBridge's
+ * Javadoc for why "this" isn't usable at this point in the method.
  *
  * The shim itself (see ../../../../shim/yaha_shim.cpp) hooks the native
  * Cysharp.Net.Http.YetAnotherHttpHandler.Native library this game's
@@ -130,18 +132,32 @@ val ff7ecShimPatch = bytecodePatch(
         // Prepend (not replace) the method body: the original attachBaseContext still
         // runs right after, unchanged.
         //
-        // A single instruction, reading only the already-valid p0 - no scratch
-        // register of our own. Earlier this also had a `const-string v0, ...` +
-        // loadLibrary() pair ahead of this call (moved into Ff7ecShimBridge.init()
-        // itself, see its Javadoc): that assumed a free v0 existed, but
-        // attachBaseContext is compiled with `.locals 0` in the real game, so v0
-        // *is* p0 - the const-string clobbered the Context reference before the
-        // second call tried to pass it, and ART's verifier rejected the whole
-        // class on every launch (VerifyError: "register v0 has type Reference:
-        // java.lang.String but expected Reference: android.content.Context").
+        // Passes p1 (the method's own `base` Context parameter), not p0
+        // ("this", the EntryApplication instance). p0 is NOT usable here:
+        // this code runs *before* the original body's super.attachBaseContext(base)
+        // call, which is what assigns ContextWrapper's mBase - so any
+        // Context method called on "this" (getAssets(), getExternalFilesDir(),
+        // etc.) dereferences a null mBase. Confirmed on-device: a native
+        // SIGABRT ("JNI DETECTED ERROR IN APPLICATION: obj == null in call
+        // to GetLongField") inside AAssetManager_fromJava, from
+        // context.getAssets() returning null in config.cpp's load_config().
+        // p1 is the system-supplied `base` Context - already fully valid at
+        // this point, regardless of whether super.attachBaseContext() has
+        // run yet.
+        //
+        // Also a single instruction, reading only an already-valid register -
+        // no scratch register of our own. Earlier this had a `const-string v0,
+        // ...` + loadLibrary() pair ahead of this call (moved into
+        // Ff7ecShimBridge.init() itself, see its Javadoc): that assumed a
+        // free v0 existed, but attachBaseContext is compiled with `.locals 0`
+        // in the real game, so v0 *is* p0 - the const-string clobbered the
+        // Context reference the second call then tried to pass, and ART's
+        // verifier rejected the whole class on every launch (VerifyError:
+        // "register v0 has type Reference: java.lang.String but expected
+        // Reference: android.content.Context").
         EntryApplicationAttachBaseContextFingerprint.method.addInstructions(
             0,
-            "invoke-static {p0}, $BRIDGE_INIT_CALL",
+            "invoke-static {p1}, $BRIDGE_INIT_CALL",
         )
     }
 }

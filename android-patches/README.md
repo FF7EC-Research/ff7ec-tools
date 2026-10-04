@@ -68,13 +68,13 @@ design follows.
 ## Architecture
 
 ```
-EntryApplication.attachBaseContext()        <- the game's own Application
-    Ff7ecShimBridge.init(this)                 subclass; earliest safe point
+EntryApplication.attachBaseContext(base)    <- the game's own Application
+    Ff7ecShimBridge.init(base)                 subclass; earliest safe point
         |                                       to load a native library from
         v
 Ff7ecShimBridge.init() (Java, NOT native - see why below)
     System.loadLibrary("ff7ec_shim")
-    nativeInit(this)
+    nativeInit(base)
         |
         v
 libff7ec_shim.so  (JNI_OnLoad does nothing; bridge.cpp's nativeInit() does the work)
@@ -86,19 +86,33 @@ libff7ec_shim.so  (JNI_OnLoad does nothing; bridge.cpp's nativeInit() does the w
 ```
 
 The patch injects exactly **one** instruction into `attachBaseContext`:
-`invoke-static {p0}, Ff7ecShimBridge;->init(Context;)V`. Earlier this was
-two instructions (`const-string v0, "ff7ec_shim"` then
-`System;->loadLibrary(v0)`, *then* the `init` call) - that crashed the app
-on every real-device launch with `VerifyError: register v0 has type
-Reference: java.lang.String but expected Reference: android.content.Context`,
-because the real `attachBaseContext` is compiled with `.locals 0`: with no
-free local registers, `v0` *is* `p0`, so the `const-string` clobbered the
-Context reference before the `init` call tried to pass it. Moving
-`loadLibrary` into `Ff7ecShimBridge.init()` itself (a plain Java wrapper
-around the real native entry point, renamed `nativeInit`) means the
-injected smali only ever reads the already-valid `p0` - no scratch
-register needed, so it verifies regardless of the target method's local
-register count.
+`invoke-static {p1}, Ff7ecShimBridge;->init(Context;)V` - **`p1`, the
+method's own `base` parameter, not `p0`/"this"**. Two real-device bugs
+were found and fixed getting here, in order:
+
+1. The injected smali originally used `p0` and also had two instructions
+   ahead of the `init` call (`const-string v0, "ff7ec_shim"` then
+   `System;->loadLibrary(v0)`) - that crashed the app on every launch with
+   `VerifyError: register v0 has type Reference: java.lang.String but
+   expected Reference: android.content.Context`, because the real
+   `attachBaseContext` is compiled with `.locals 0`: with no free local
+   registers, `v0` *is* `p0`, so the `const-string` clobbered the Context
+   reference before the `init` call tried to pass it. Fixed by moving
+   `loadLibrary` into `Ff7ecShimBridge.init()` itself (a plain Java
+   wrapper around the real native entry point, renamed `nativeInit`), so
+   the injected smali only ever reads an already-valid register - no
+   scratch register needed, verifies regardless of local register count.
+2. With that fixed, the app still crashed - this time natively, with
+   `SIGABRT`: `JNI DETECTED ERROR IN APPLICATION: obj == null in call to
+   GetLongField`, inside `AAssetManager_fromJava`, from
+   `context.getAssets()` returning null in `load_config()`. Cause: the
+   call still passed `p0` ("this", the `EntryApplication` instance) -
+   but this code runs *before* the original method body's
+   `super.attachBaseContext(base)` call, which is what assigns
+   `ContextWrapper`'s `mBase`. Any Context method called on `this` before
+   that line runs dereferences a null `mBase`. Fixed by passing `p1`
+   (`base`) instead - the system-supplied Context, already fully valid
+   regardless of whether `super.attachBaseContext()` has run yet.
 
 IL2CPP resolves every `[DllImport]` target via its own `dlopen()`+`dlsym()`
 at first use, not a static ELF dependency - so the yaha_* hooks are
@@ -160,18 +174,25 @@ were captured.
 
 ## Verification status (read before trusting this blind)
 
-- **Confirmed on-device, then crashed, then fixed**: the first real patch +
-  install run (real `app.morphe.manager` 1.33.0, patcher 1.15.0, a real
-  XAPK) patched and installed cleanly - but the app opened to a black
-  screen and closed instantly. `adb logcat` showed
-  `java.lang.VerifyError` rejecting `EntryApplication.attachBaseContext`
-  on every launch. Root cause and fix: see "Architecture" above (the
-  injected smali's `const-string v0` footgun) - `Ff7ecShimBridge.init()`
-  is now the only thing the patch calls into `attachBaseContext`, and it
-  does the `loadLibrary` itself. **Not yet re-verified on-device** (needs
-  an actual patch + install cycle against this exact fix) - that's the
-  next thing to confirm, not something to assume fixed from the CI build
-  alone.
+- **Two real on-device crashes found and fixed via `adb logcat`, in
+  sequence - still not fully clean, see below.** First: a patch+install
+  run (real `app.morphe.manager` 1.33.0, patcher 1.15.0, a real XAPK)
+  opened to a black screen and closed instantly, logcat showing
+  `java.lang.VerifyError` rejecting `attachBaseContext` (the injected
+  smali's `const-string v0` footgun). Fixed and re-verified by patching
+  again: the `VerifyError` was gone, `attachBaseContext` →
+  `Ff7ecShimBridge.init()` → `nativeInit()` → `bridge_init()` all ran -
+  but the app then crashed **natively** with `SIGABRT`
+  (`JNI DETECTED ERROR IN APPLICATION: obj == null in call to
+  GetLongField`, inside `AAssetManager_fromJava`, from `load_config()`'s
+  `context.getAssets()` call returning null). Root cause and fix: see
+  "Architecture" above - passing `p0` ("this") before
+  `super.attachBaseContext()` runs dereferences a null `mBase`; now
+  passes `p1` (`base`) instead. **Not yet re-verified on-device** (needs
+  another patch + install cycle against this exact fix) - that's the
+  next thing to confirm. Given two real bugs have now been found this
+  way in a row, budget for a third until an install actually reaches a
+  working main menu.
 - **FIXED and re-verified by a real CI build (run #14,
   `8b00c69`/`5db9547`)**: the 0-patches/no-icon bug described below. The
   published release asset (`morphe-patches` tag, `patches-0.1.0.mpp`) now
