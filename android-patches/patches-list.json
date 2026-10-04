@@ -63,14 +63,6 @@
       "options": []
     },
     {
-      "name": "FF7EC network shim (files)",
-      "description": "Bundles the native preservation shim into the APK.",
-      "default": false,
-      "dependencies": [],
-      "compatiblePackages": null,
-      "options": []
-    },
-    {
       "name": "Log decrypted traffic",
       "description": "Writes decrypted gRPC request/response bodies under the app's own external-files folder: Android/data/com.square_enix.android_googleplay.ff7ecww/files/ff7ec_logs/ (no storage permission needed - it's the app's own directory).",
       "default": true,
