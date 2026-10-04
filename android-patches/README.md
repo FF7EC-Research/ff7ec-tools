@@ -197,6 +197,9 @@ were captured.
 
 ## Verification status (read before trusting this blind)
 
+- **Currently mid-bisection on a fourth crash - see "Bisecting the silent
+  SIGABRT" below before trusting anything past `attachBaseContext` runs
+  cleanly.**
 - **Three real on-device crashes found and fixed in sequence via `adb
   logcat`/tombstones - still not fully clean, see below.** Each fix was
   re-verified by patching again and getting *further* before the next
@@ -224,6 +227,39 @@ were captured.
   bugs have now been found this way in a row, each only surfacing once
   the previous one was fixed, budget for a fourth until an install
   actually reaches a working main menu.
+
+### Bisecting the silent SIGABRT (crash #4, in progress)
+
+The platform-library skip above (crash #3's fix) produced a **byte-for-byte
+identical crash** on a verified-rebuilt `.so` (different BuildId, same
+`lr`/`pc`/`sp`, same no-`Abort message`, same unresolvable 3-frame
+backtrace) - so that diagnosis was wrong, or at least incomplete. Worse:
+across every capture so far, including ones taken with logging armed and
+running *continuously before launch* (ruling out a late-attach race),
+**none of `nativeInit()`'s own `LOGT` breadcrumbs ever reach logcat** -
+not even the first one, despite a prior tombstone's own backtrace proving
+execution once reached `load_config()`. `x1` in every register dump
+turned out to just be the crashing `tid` (confirmed by converting it to
+decimal and matching the `pid:` line) - i.e. this is a completely generic
+`abort()` → `raise()` → `tgkill()` sequence that tells us nothing about
+who called `abort()`. Guessing further from an opaque, unsymbolizable
+backtrace isn't productive.
+
+`bridge.cpp` now has a compile-time `FF7EC_DIAG_STAGE` gate (0-5) on
+`nativeInit()`, currently checked in at **`0`: the function does nothing
+and returns immediately** - not even its own first log call. This is a
+deliberate, temporary bisection, not a regression:
+
+- If the app **still crashes identically** at stage 0, the bug isn't in
+  this function's body at all - look at the JNI boundary, the dex merge,
+  or something unrelated to the shim's own logic entirely (e.g. the game
+  reacting to the patched APK).
+- If it **doesn't crash** at stage 0, raise `FF7EC_DIAG_STAGE` by one
+  (each stage adds back exactly one call: 1 = the first log line only,
+  2 = `+ bridge_init()`, 3 = `+ load_config()`, 4 = `+
+  install_yaha_hooks()`, 5 = everything) and rebuild/retest, one stage at
+  a time, until it crashes again - that pinpoints the exact call.
+
 - **FIXED and re-verified by a real CI build (run #14,
   `8b00c69`/`5db9547`)**: the 0-patches/no-icon bug described below. The
   published release asset (`morphe-patches` tag, `patches-0.1.0.mpp`) now
