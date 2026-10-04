@@ -129,13 +129,19 @@ val ff7ecShimPatch = bytecodePatch(
     execute {
         // Prepend (not replace) the method body: the original attachBaseContext still
         // runs right after, unchanged.
+        //
+        // A single instruction, reading only the already-valid p0 - no scratch
+        // register of our own. Earlier this also had a `const-string v0, ...` +
+        // loadLibrary() pair ahead of this call (moved into Ff7ecShimBridge.init()
+        // itself, see its Javadoc): that assumed a free v0 existed, but
+        // attachBaseContext is compiled with `.locals 0` in the real game, so v0
+        // *is* p0 - the const-string clobbered the Context reference before the
+        // second call tried to pass it, and ART's verifier rejected the whole
+        // class on every launch (VerifyError: "register v0 has type Reference:
+        // java.lang.String but expected Reference: android.content.Context").
         EntryApplicationAttachBaseContextFingerprint.method.addInstructions(
             0,
-            """
-                const-string v0, "ff7ec_shim"
-                invoke-static {v0}, Ljava/lang/System;->loadLibrary(Ljava/lang/String;)V
-                invoke-static {p0}, $BRIDGE_INIT_CALL
-            """,
+            "invoke-static {p0}, $BRIDGE_INIT_CALL",
         )
     }
 }
